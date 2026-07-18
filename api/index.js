@@ -61,9 +61,13 @@ function fromSlug(slug) {
 // own `keywords` field (returned by the API), rather than a hand-typed
 // list. This grows/shrinks naturally as real trending content changes,
 // instead of being a fixed set of manufactured search-term pages.
-function extractTopKeywords(videos, limit = 24) {
+// Widened to accept multiple video arrays (trending + latest + brazzers)
+// so the pool draws from more real, current data before ranking by
+// frequency — more variety without inventing anything.
+function extractTopKeywords(videoArrays, limit = 60) {
     const counts = new Map();
-    videos.forEach(v => {
+    const allVideos = [].concat(...videoArrays);
+    allVideos.forEach(v => {
         if (!v.keywords) return;
         v.keywords.split(',').forEach(raw => {
             const kw = raw.trim().toLowerCase();
@@ -75,6 +79,31 @@ function extractTopKeywords(videos, limit = 24) {
         .sort((a, b) => b[1] - a[1])
         .slice(0, limit)
         .map(([kw]) => kw);
+}
+
+// NEW: Real sort options — these map directly to the eporner API's own
+// `order` values, so "sorting" is genuine, not decorative.
+const SORT_OPTIONS = [
+    { value: 'top-weekly', label: 'Trending' },
+    { value: 'top-rated', label: 'Top Rated' },
+    { value: 'latest', label: 'Latest' },
+];
+
+// Renders crawlable <a> sort links (not JS-only) so search engines can
+// follow them, and validates the incoming order value against a safe list
+// before it's ever passed to the upstream API.
+function renderSortLinks(basePath, currentOrder) {
+    return SORT_OPTIONS.map(opt => {
+        const active = opt.value === currentOrder;
+        const cls = active
+            ? 'px-3 py-1 rounded bg-red-600 text-white text-xs font-bold'
+            : 'px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400';
+        return `<a href="${basePath}?order=${opt.value}" class="${cls}">${opt.label}</a>`;
+    }).join(' ');
+}
+
+function safeOrder(order) {
+    return SORT_OPTIONS.some(o => o.value === order) ? order : 'top-weekly';
 }
 
 // -------------------------------------------------------------
@@ -108,7 +137,7 @@ const AD_SLOT_HTML = `
     </div>
 `;
 
-function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd }) {
+function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd, robotsMeta }) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -117,7 +146,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <title>${title}</title>
     <meta name="description" content="${description}">
     <meta name="keywords" content="${keywords}">
-    <meta name="robots" content="index, follow">
+    <meta name="robots" content="${robotsMeta || 'index, follow'}">
     <meta name="rating" content="adult">
     <meta name="rating" content="RTA-5042-1996-1400-1577-RTA">
     <link rel="canonical" href="${DOMAIN}${canonicalPath}">
@@ -138,10 +167,13 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <header class="bg-slate-900 border-b border-slate-800 p-3 sm:p-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
             <a href="/" class="text-xl sm:text-2xl font-black text-red-500 text-center sm:text-left">STREAM<span class="text-white">HUB</span>ELITE</a>
-            <form action="/search" method="GET" class="flex gap-2 w-full sm:w-auto">
-                <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
-                <button type="submit" class="bg-red-600 px-4 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap">Search</button>
-            </form>
+            <div class="flex gap-2 items-center w-full sm:w-auto">
+                <form action="/search" method="GET" class="flex gap-2 flex-grow sm:flex-grow-0">
+                    <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
+                    <button type="submit" class="bg-red-600 px-4 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap">Search</button>
+                </form>
+                <a href="/favorites" class="bg-slate-800 px-3 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap border border-slate-700 hover:border-red-500">❤ <span id="favNavCount">0</span></a>
+            </div>
         </div>
     </header>
 
@@ -152,6 +184,40 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <footer class="bg-slate-900 border-t border-slate-800 p-6 text-center text-xs text-slate-500">
         <p>&copy; ${new Date().getFullYear()} StreamHub Elite. All Rights Reserved. 18+ Adult Content.</p>
     </footer>
+
+    <script>
+        // CHANGE: Favorites stored ONLY in the visitor's own browser
+        // (localStorage) — never sent to the server, no account needed.
+        // This is a real feature port from the file you uploaded, minus
+        // any ad code.
+        function getFavorites() {
+            try { return JSON.parse(localStorage.getItem('streamhub_favs')) || []; }
+            catch (e) { return []; }
+        }
+        function setFavorites(list) {
+            localStorage.setItem('streamhub_favs', JSON.stringify(list));
+            document.querySelectorAll('#favNavCount').forEach(el => el.textContent = list.length);
+        }
+        function toggleFavorite(id, title, thumb, href) {
+            const favs = getFavorites();
+            const idx = favs.findIndex(f => f.id === id);
+            if (idx > -1) favs.splice(idx, 1);
+            else favs.push({ id, title, thumb, href });
+            setFavorites(favs);
+            paintFavoriteButtons();
+        }
+        function paintFavoriteButtons() {
+            const favs = getFavorites();
+            document.querySelectorAll('[data-fav-id]').forEach(btn => {
+                const isSaved = favs.some(f => String(f.id) === btn.getAttribute('data-fav-id'));
+                btn.textContent = isSaved ? '❤' : '♡';
+            });
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            setFavorites(getFavorites());
+            paintFavoriteButtons();
+        });
+    </script>
 </body>
 </html>`;
 }
@@ -159,9 +225,12 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 function renderVideoGrid(videos) {
     let html = '';
     videos.forEach((v, index) => {
+        const href = `/video/${v.id}/${toSlug(v.title)}`;
+        const safeTitle = v.title.replace(/'/g, "\\'");
         html += `
-            <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800">
-                <a href="/video/${v.id}/${toSlug(v.title)}">
+            <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800 relative">
+                <button data-fav-id="${v.id}" onclick="toggleFavorite('${v.id}', '${safeTitle}', '${v.default_thumb.src}', '${href}')" class="absolute top-2 right-2 z-10 w-7 h-7 bg-slate-950/80 rounded-lg flex items-center justify-center text-sm border border-slate-800">♡</button>
+                <a href="${href}">
                     <img src="${v.default_thumb.src}" alt="${v.title}" class="w-full h-48 object-cover" loading="lazy">
                     <div class="p-3">
                         <h2 class="text-sm font-bold truncate text-slate-200">${v.title}</h2>
@@ -207,9 +276,10 @@ app.get('/', async (req, res) => {
             <a href="/star/${p.slug}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${p.label}</a>
         `).join('');
 
-        // CHANGE: Trending keyword cloud generated from real data in the
-        // trending feed above — not a fixed manufactured list.
-        const topKeywords = extractTopKeywords(trendingVideos);
+        // CHANGE: Trending keyword cloud now pulls from all three real feeds
+        // above (Brazzers + Trending + Latest) instead of just one, giving a
+        // wider genuine pool before ranking by frequency.
+        const topKeywords = extractTopKeywords([brazzersVideos, trendingVideos, latestVideos]);
         cache.set('trending-keywords', { data: topKeywords, time: Date.now() }); // reused by sitemap-keywords.xml
         const keywordLinks = topKeywords.map(kw => `
             <a href="/keyword/${toSlug(kw)}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${kw}</a>
@@ -259,16 +329,20 @@ app.get('/', async (req, res) => {
 app.get('/tag/:slug', async (req, res) => {
     const category = findBySlug(CATEGORIES, req.params.slug);
     if (!category) return res.status(404).send('Category not found');
+    const order = safeOrder(req.query.order);
 
     try {
         const data = await cachedGet(
-            `tag:${category.slug}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(category.label)}&per_page=24&thumbsize=big&hd=1`
+            `tag:${category.slug}:${order}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(category.label)}&order=${order}&per_page=24&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
 
         const content = `
-            <h1 class="text-2xl font-bold mb-2 text-red-500">${category.label} Videos</h1>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+                <h1 class="text-2xl font-bold text-red-500">${category.label} Videos</h1>
+                <div class="flex gap-2">${renderSortLinks(`/tag/${category.slug}`, order)}</div>
+            </div>
             <p class="text-sm text-slate-400 mb-6">${category.blurb}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
         `;
@@ -289,16 +363,20 @@ app.get('/tag/:slug', async (req, res) => {
 app.get('/star/:slug', async (req, res) => {
     const performer = findBySlug(PERFORMERS, req.params.slug);
     if (!performer) return res.status(404).send('Performer not found');
+    const order = safeOrder(req.query.order);
 
     try {
         const data = await cachedGet(
-            `star:${performer.slug}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(performer.label)}&per_page=24&thumbsize=big&hd=1`
+            `star:${performer.slug}:${order}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(performer.label)}&order=${order}&per_page=24&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
 
         const content = `
-            <h1 class="text-2xl font-bold mb-2 text-red-500">${performer.label}</h1>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+                <h1 class="text-2xl font-bold text-red-500">${performer.label}</h1>
+                <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
+            </div>
             <p class="text-sm text-slate-400 mb-6">${performer.blurb}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
         `;
@@ -324,17 +402,21 @@ app.get('/star/:slug', async (req, res) => {
 app.get('/keyword/:slug', async (req, res) => {
     const slug = req.params.slug;
     const term = fromSlug(slug);
+    const order = safeOrder(req.query.order);
 
     try {
         const data = await cachedGet(
-            `keyword:${slug}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(term)}&per_page=24&thumbsize=big&hd=1`
+            `keyword:${slug}:${order}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(term)}&order=${order}&per_page=24&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
         if (videos.length === 0) return res.status(404).send('No results for this keyword');
 
         const content = `
-            <h1 class="text-2xl font-bold mb-2 text-red-500">${term} Videos</h1>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+                <h1 class="text-2xl font-bold text-red-500">${term} Videos</h1>
+                <div class="flex gap-2">${renderSortLinks(`/keyword/${slug}`, order)}</div>
+            </div>
             <p class="text-sm text-slate-400 mb-6">Currently trending clips matching "${term}".</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
         `;
@@ -349,6 +431,51 @@ app.get('/keyword/:slug', async (req, res) => {
     } catch (err) {
         res.status(503).send('This page is temporarily unavailable. Please try again shortly.');
     }
+});
+
+// NEW: Favorites page. Content lives only in the visitor's own browser
+// (localStorage), so the server can't render it — this page ships an empty
+// shell plus a script that reads localStorage and builds the grid
+// client-side. Marked noindex/nofollow: there's no real shared content
+// here for search engines to index, and indexing an empty shell would be
+// exactly the kind of thin-page problem we've been avoiding elsewhere.
+app.get('/favorites', (req, res) => {
+    const content = `
+        <h1 class="text-2xl font-bold mb-6 text-red-500">My Saved Videos</h1>
+        <div id="favGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4"></div>
+        <p id="favEmpty" class="text-sm text-slate-400 hidden">You haven't saved any videos yet. Tap the ♡ icon on any video to save it here.</p>
+        <script>
+            (function() {
+                const favs = JSON.parse(localStorage.getItem('streamhub_favs') || '[]');
+                const grid = document.getElementById('favGrid');
+                const empty = document.getElementById('favEmpty');
+                if (favs.length === 0) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+                favs.forEach(f => {
+                    const div = document.createElement('div');
+                    div.className = 'bg-slate-900 rounded-lg overflow-hidden border border-slate-800 relative';
+                    div.innerHTML = \`
+                        <button data-fav-id="\${f.id}" onclick="toggleFavorite('\${f.id}', '', '', '')" class="absolute top-2 right-2 z-10 w-7 h-7 bg-slate-950/80 rounded-lg flex items-center justify-center text-sm border border-slate-800">❤</button>
+                        <a href="\${f.href}">
+                            <img src="\${f.thumb}" alt="\${f.title}" class="w-full h-48 object-cover" loading="lazy">
+                            <div class="p-3"><h2 class="text-sm font-bold truncate text-slate-200">\${f.title}</h2></div>
+                        </a>\`;
+                    grid.appendChild(div);
+                });
+            })();
+        </script>
+    `;
+
+    res.send(renderHTMLPage({
+        title: 'My Saved Videos - StreamHub Elite',
+        description: 'Videos you have saved for later.',
+        keywords: '',
+        canonicalPath: '/favorites',
+        contentHtml: content,
+        robotsMeta: 'noindex, nofollow'
+    }));
 });
 
 app.get('/search', (req, res) => {
