@@ -6,14 +6,9 @@ const app = express();
 const DOMAIN = 'https://vexn.org';
 
 // -------------------------------------------------------------
-// 1. CATEGORY LIST (CONSOLIDATED — no auto-generated modifier spam)
+// 1. CATEGORY LIST — Brazzers listed first on purpose (see homepage route,
+// which pins it as a featured strip before the rest of the grid).
 // -------------------------------------------------------------
-// CHANGE: Removed the BASE_CATEGORIES x MODIFIERS cross-product (was ~135
-// near-duplicate pages like "Brazzers hd videos", "Brazzers full movie",
-// "Brazzers trending clips"...). That pattern reads as doorway pages to
-// search engines and risks algorithmic or manual suppression.
-// Keep ONE page per real category. Add unique editorial copy per category
-// below instead of relying on keyword variants to create "more pages".
 const CATEGORIES = [
     { slug: 'brazzers', label: 'Brazzers', blurb: 'Studio-produced scenes from one of the best-known adult production brands.' },
     { slug: 'reality-kings', label: 'Reality Kings', blurb: 'Reality-style scenarios and recurring series content.' },
@@ -26,24 +21,65 @@ const CATEGORIES = [
     { slug: 'lesbian', label: 'Lesbian', blurb: 'Scenes featuring lesbian performers.' },
     { slug: 'pov', label: 'POV', blurb: 'Point-of-view perspective videos.' },
     { slug: 'creampie', label: 'Creampie', blurb: 'Creampie-focused category page.' },
+    { slug: 'desi', label: 'Desi', blurb: 'Content from South Asian creators and studios.' },
+    { slug: 'web-series', label: 'Web Series', blurb: 'Episodic web-series style adult content.' },
+    { slug: 'jav', label: 'JAV', blurb: 'Japanese Adult Video (JAV) genre content.' },
+    { slug: 'japanese', label: 'Japanese', blurb: 'Content featuring Japanese performers and studios.' },
 ];
 
-function findCategory(slug) {
-    return CATEGORIES.find(c => c.slug === slug);
+// -------------------------------------------------------------
+// NOTE ON "STARS" AND "COUNTRY" PAGES:
+// The eporner API has no structured performer or country field — only a
+// free-text `keywords` string per video. A performer list below is a
+// CURATED set of names used as search queries (same mechanism as
+// categories), not data pulled from a dedicated API field. There is no
+// country data available at all, so no country-based pages are included —
+// building those would mean inventing labels not backed by real data,
+// which would hurt trust/quality signals rather than help them.
+// -------------------------------------------------------------
+const PERFORMERS = [
+    { slug: 'eva-elfie', label: 'Eva Elfie', blurb: 'Scenes and clips featuring Eva Elfie.' },
+    { slug: 'lana-rhoades', label: 'Lana Rhoades', blurb: 'Scenes and clips featuring Lana Rhoades.' },
+    { slug: 'angela-white', label: 'Angela White', blurb: 'Scenes and clips featuring Angela White.' },
+    { slug: 'abella-danger', label: 'Abella Danger', blurb: 'Scenes and clips featuring Abella Danger.' },
+];
+
+function findBySlug(list, slug) {
+    return list.find(c => c.slug === slug);
 }
 
 function toSlug(text) {
     return slugify(text, { lower: true, strict: true });
 }
 
+function fromSlug(slug) {
+    return slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// CHANGE: Builds a "trending keywords" list from REAL data — it counts how
+// often each keyword appears across a batch of currently trending videos'
+// own `keywords` field (returned by the API), rather than a hand-typed
+// list. This grows/shrinks naturally as real trending content changes,
+// instead of being a fixed set of manufactured search-term pages.
+function extractTopKeywords(videos, limit = 24) {
+    const counts = new Map();
+    videos.forEach(v => {
+        if (!v.keywords) return;
+        v.keywords.split(',').forEach(raw => {
+            const kw = raw.trim().toLowerCase();
+            if (kw.length < 2) return;
+            counts.set(kw, (counts.get(kw) || 0) + 1);
+        });
+    });
+    return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([kw]) => kw);
+}
+
 // -------------------------------------------------------------
 // 2. SIMPLE IN-MEMORY CACHE
 // -------------------------------------------------------------
-// CHANGE: Previously every route hit the upstream API live and returned a
-// bare 500 on any failure/timeout. If Googlebot crawls during an upstream
-// hiccup, it sees a 500 — that damages crawl budget and can get pages
-// dropped from the index. Cache last-good responses with a TTL so a
-// transient failure serves slightly-stale content instead of an error.
 const cache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -66,13 +102,6 @@ async function cachedGet(key, url) {
 // -------------------------------------------------------------
 // 3. HTML SSR TEMPLATE
 // -------------------------------------------------------------
-// CHANGE: Added Open Graph / Twitter card tags (improves click-through when
-// shared/linked) and a JSON-LD slot. Removed the third-party ad script
-// (supportiveinvoicevarnish.com) — that domain pattern is commonly
-// associated with pop-under/redirect ad networks that get flagged by
-// Google Safe Browsing. A Safe Browsing flag is far more damaging to
-// rankings and traffic than losing that ad slot. Replace `AD_SLOT_HTML`
-// with a vetted ad network's official embed if/when you pick one.
 const AD_SLOT_HTML = `
     <div class="bg-slate-900/40 rounded-lg p-3 border border-slate-800 flex items-center justify-center col-span-1 min-h-[250px]">
         <span class="text-[9px] font-mono text-slate-600 uppercase">Ad slot — insert vetted network embed here</span>
@@ -106,17 +135,17 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ''}
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
-    <header class="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <a href="/" class="text-2xl font-black text-red-500">STREAM<span class="text-white">HUB</span>ELITE</a>
-            <form action="/search" method="GET" class="flex gap-2">
-                <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-1 rounded border border-slate-800 text-sm">
-                <button type="submit" class="bg-red-600 px-4 py-1 rounded text-sm font-bold">Search</button>
+    <header class="bg-slate-900 border-b border-slate-800 p-3 sm:p-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+            <a href="/" class="text-xl sm:text-2xl font-black text-red-500 text-center sm:text-left">STREAM<span class="text-white">HUB</span>ELITE</a>
+            <form action="/search" method="GET" class="flex gap-2 w-full sm:w-auto">
+                <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
+                <button type="submit" class="bg-red-600 px-4 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap">Search</button>
             </form>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-4 py-8 flex-grow w-full">
+    <main class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8 flex-grow w-full">
         ${contentHtml}
     </main>
 
@@ -152,26 +181,73 @@ function renderVideoGrid(videos) {
 // 4. ROUTES
 // -------------------------------------------------------------
 
+// CHANGE: Homepage now pulls THREE feeds instead of one:
+//   1. Brazzers — pinned first, per your request to lead with that brand
+//   2. Trending — order=top-weekly (eporner's real "trending" sort)
+//   3. Latest — order=latest (eporner's real "newest" sort)
+// All three run in parallel via Promise.allSettled so one failing feed
+// doesn't take down the whole homepage.
 app.get('/', async (req, res) => {
     try {
-        const data = await cachedGet('home', 'https://www.eporner.com/api/v2/video/search/?per_page=20&thumbsize=big&hd=1');
-        const videos = data.videos || [];
+        const [brazzersRes, trendingRes, latestRes] = await Promise.allSettled([
+            cachedGet('home:brazzers', 'https://www.eporner.com/api/v2/video/search/?query=Brazzers&per_page=8&thumbsize=big&hd=1'),
+            cachedGet('home:trending', 'https://www.eporner.com/api/v2/video/search/?order=top-weekly&per_page=12&thumbsize=big&hd=1'),
+            cachedGet('home:latest', 'https://www.eporner.com/api/v2/video/search/?order=latest&per_page=12&thumbsize=big&hd=1'),
+        ]);
+
+        const brazzersVideos = brazzersRes.status === 'fulfilled' ? (brazzersRes.value.videos || []) : [];
+        const trendingVideos = trendingRes.status === 'fulfilled' ? (trendingRes.value.videos || []) : [];
+        const latestVideos = latestRes.status === 'fulfilled' ? (latestRes.value.videos || []) : [];
 
         const categoryLinks = CATEGORIES.map(c => `
             <a href="/tag/${c.slug}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${c.label}</a>
         `).join('');
 
+        const performerLinks = PERFORMERS.map(p => `
+            <a href="/star/${p.slug}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${p.label}</a>
+        `).join('');
+
+        // CHANGE: Trending keyword cloud generated from real data in the
+        // trending feed above — not a fixed manufactured list.
+        const topKeywords = extractTopKeywords(trendingVideos);
+        cache.set('trending-keywords', { data: topKeywords, time: Date.now() }); // reused by sitemap-keywords.xml
+        const keywordLinks = topKeywords.map(kw => `
+            <a href="/keyword/${toSlug(kw)}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${kw}</a>
+        `).join('');
+
         const content = `
-            <h1 class="text-2xl font-bold mb-4 text-red-500">Trending HD Streams</h1>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-8">${renderVideoGrid(videos)}</div>
+            <div class="mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h1 class="text-2xl font-bold text-red-500">Brazzers</h1>
+                    <a href="/tag/brazzers" class="text-xs text-slate-400 hover:text-red-400">View all →</a>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(brazzersVideos)}</div>
+            </div>
+
+            <div class="mb-8">
+                <h2 class="text-xl font-bold mb-4 text-slate-200">Trending This Week</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(trendingVideos)}</div>
+            </div>
+
+            <div class="mb-8">
+                <h2 class="text-xl font-bold mb-4 text-slate-200">Latest Uploads</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos)}</div>
+            </div>
+
             <h2 class="text-lg font-bold mb-3 text-slate-400">Browse Categories</h2>
-            <div class="flex flex-wrap gap-2">${categoryLinks}</div>
+            <div class="flex flex-wrap gap-2 mb-6">${categoryLinks}</div>
+
+            <h2 class="text-lg font-bold mb-3 text-slate-400">Browse Performers</h2>
+            <div class="flex flex-wrap gap-2 mb-6">${performerLinks}</div>
+
+            <h2 class="text-lg font-bold mb-3 text-slate-400">Trending Keywords</h2>
+            <div class="flex flex-wrap gap-2">${keywordLinks}</div>
         `;
 
         res.send(renderHTMLPage({
-            title: 'StreamHub Elite | Watch Free Ultra-HD Adult Streams',
-            description: 'Stream thousands of HD inline video streams online for free.',
-            keywords: CATEGORIES.map(c => c.label).join(', '),
+            title: 'StreamHub Elite | Brazzers, Trending & Latest HD Streams',
+            description: 'Watch Brazzers scenes plus trending and newly uploaded HD streams, updated daily.',
+            keywords: ['Brazzers', ...CATEGORIES.map(c => c.label), ...PERFORMERS.map(p => p.label)].join(', '),
             canonicalPath: '/',
             contentHtml: content
         }));
@@ -180,14 +256,8 @@ app.get('/', async (req, res) => {
     }
 });
 
-// CHANGE: Route now keyed off the fixed CATEGORIES list (one real page per
-// category) instead of accepting any arbitrary slug and re-querying the API
-// with a synthesized "category + modifier" string. Unknown slugs get a 404
-// instead of silently generating a new thin page — this stops the page
-// count from growing unbounded and keeps Google from finding an infinite
-// crawl space.
 app.get('/tag/:slug', async (req, res) => {
-    const category = findCategory(req.params.slug);
+    const category = findBySlug(CATEGORIES, req.params.slug);
     if (!category) return res.status(404).send('Category not found');
 
     try {
@@ -215,10 +285,78 @@ app.get('/tag/:slug', async (req, res) => {
     }
 });
 
+// NEW: Performer pages, same pattern as /tag/:slug.
+app.get('/star/:slug', async (req, res) => {
+    const performer = findBySlug(PERFORMERS, req.params.slug);
+    if (!performer) return res.status(404).send('Performer not found');
+
+    try {
+        const data = await cachedGet(
+            `star:${performer.slug}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(performer.label)}&per_page=24&thumbsize=big&hd=1`
+        );
+        const videos = data.videos || [];
+
+        const content = `
+            <h1 class="text-2xl font-bold mb-2 text-red-500">${performer.label}</h1>
+            <p class="text-sm text-slate-400 mb-6">${performer.blurb}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
+        `;
+
+        res.send(renderHTMLPage({
+            title: `${performer.label} - HD Videos - StreamHub Elite`,
+            description: performer.blurb,
+            keywords: `${performer.label}, adult videos, hd streaming`,
+            canonicalPath: `/star/${performer.slug}`,
+            contentHtml: content
+        }));
+    } catch (err) {
+        res.status(503).send('This page is temporarily unavailable. Please try again shortly.');
+    }
+});
+
+// NEW: Generic keyword page. Unlike the old modifier-matrix approach, this
+// does NOT pre-generate a fixed list of URLs — it queries the API live for
+// whatever real keyword slug is requested (normally reached via the
+// Trending Keywords cloud on the homepage, which is itself built from
+// real current data). If a keyword returns no videos, it 404s instead of
+// serving an empty shell page.
+app.get('/keyword/:slug', async (req, res) => {
+    const slug = req.params.slug;
+    const term = fromSlug(slug);
+
+    try {
+        const data = await cachedGet(
+            `keyword:${slug}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(term)}&per_page=24&thumbsize=big&hd=1`
+        );
+        const videos = data.videos || [];
+        if (videos.length === 0) return res.status(404).send('No results for this keyword');
+
+        const content = `
+            <h1 class="text-2xl font-bold mb-2 text-red-500">${term} Videos</h1>
+            <p class="text-sm text-slate-400 mb-6">Currently trending clips matching "${term}".</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
+        `;
+
+        res.send(renderHTMLPage({
+            title: `${term} Videos - Trending HD Clips - StreamHub Elite`,
+            description: `Watch trending ${term} HD video clips, updated as new content trends.`,
+            keywords: `${term}, trending, adult videos`,
+            canonicalPath: `/keyword/${slug}`,
+            contentHtml: content
+        }));
+    } catch (err) {
+        res.status(503).send('This page is temporarily unavailable. Please try again shortly.');
+    }
+});
+
 app.get('/search', (req, res) => {
     const q = req.query.q || '';
-    const match = CATEGORIES.find(c => c.label.toLowerCase() === q.toLowerCase() || c.slug === toSlug(q));
-    if (match) return res.redirect(`/tag/${match.slug}`);
+    const catMatch = CATEGORIES.find(c => c.label.toLowerCase() === q.toLowerCase() || c.slug === toSlug(q));
+    if (catMatch) return res.redirect(`/tag/${catMatch.slug}`);
+    const starMatch = PERFORMERS.find(p => p.label.toLowerCase() === q.toLowerCase() || p.slug === toSlug(q));
+    if (starMatch) return res.redirect(`/star/${starMatch.slug}`);
     res.redirect('/');
 });
 
@@ -228,9 +366,6 @@ app.get('/video/:id/:slug?', async (req, res) => {
         const video = await cachedGet(`video:${id}`, `https://www.eporner.com/api/v2/video/id/?id=${id}`);
         if (!video || !video.embed) return res.status(404).send('Video Not Found');
 
-        // CHANGE: Added VideoObject structured data. This is what actually
-        // lets Google show video rich results / thumbnails in search,
-        // rather than relying on keyword-stuffed meta tags.
         const jsonLd = {
             '@context': 'https://schema.org',
             '@type': 'VideoObject',
@@ -269,28 +404,40 @@ app.get('/video/:id/:slug?', async (req, res) => {
     }
 });
 
+// -------------------------------------------------------------
+// 5. SITEMAPS — now split into: index -> categories, performers, videos
+// -------------------------------------------------------------
 app.get('/sitemap.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
+    const now = new Date().toISOString();
     res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <sitemap>
         <loc>${DOMAIN}/sitemap-categories.xml</loc>
-        <lastmod>${new Date().toISOString()}</lastmod>
+        <lastmod>${now}</lastmod>
+    </sitemap>
+    <sitemap>
+        <loc>${DOMAIN}/sitemap-performers.xml</loc>
+        <lastmod>${now}</lastmod>
+    </sitemap>
+    <sitemap>
+        <loc>${DOMAIN}/sitemap-videos.xml</loc>
+        <lastmod>${now}</lastmod>
+    </sitemap>
+    <sitemap>
+        <loc>${DOMAIN}/sitemap-keywords.xml</loc>
+        <lastmod>${now}</lastmod>
     </sitemap>
 </sitemapindex>`);
 });
 
-// CHANGE: Renamed from sitemap-keywords.xml to sitemap-categories.xml and
-// now lists only the real, fixed category pages — not ~135 synthesized
-// keyword-modifier URLs.
 app.get('/sitemap-categories.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
-
     const urls = CATEGORIES.map(c => `
     <url>
         <loc>${DOMAIN}/tag/${c.slug}</loc>
         <changefreq>daily</changefreq>
-        <priority>0.8</priority>
+        <priority>${c.slug === 'brazzers' ? '1.0' : '0.8'}</priority>
     </url>`).join('');
 
     res.send(`<?xml version="1.0" encoding="UTF-8"?>
@@ -302,6 +449,85 @@ app.get('/sitemap-categories.xml', (req, res) => {
     </url>
     ${urls}
 </urlset>`);
+});
+
+// NEW: Performer sitemap.
+app.get('/sitemap-performers.xml', (req, res) => {
+    res.header('Content-Type', 'application/xml');
+    const urls = PERFORMERS.map(p => `
+    <url>
+        <loc>${DOMAIN}/star/${p.slug}</loc>
+        <changefreq>weekly</changefreq>
+        <priority>0.7</priority>
+    </url>`).join('');
+
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    ${urls}
+</urlset>`);
+});
+
+// NEW: Keyword sitemap — pulls from the same real trending-keyword cache
+// populated by the homepage (extractTopKeywords). If the cache is empty
+// (e.g. cold start, no one has hit "/" yet), it fetches trending videos
+// itself first rather than serving a stale fixed list.
+app.get('/sitemap-keywords.xml', async (req, res) => {
+    res.header('Content-Type', 'application/xml');
+    try {
+        let cached = cache.get('trending-keywords');
+        let keywords = cached ? cached.data : [];
+        if (keywords.length === 0) {
+            const data = await cachedGet('home:trending', 'https://www.eporner.com/api/v2/video/search/?order=top-weekly&per_page=12&thumbsize=big&hd=1');
+            keywords = extractTopKeywords(data.videos || []);
+        }
+
+        const urls = keywords.map(kw => `
+    <url>
+        <loc>${DOMAIN}/keyword/${toSlug(kw)}</loc>
+        <changefreq>daily</changefreq>
+        <priority>0.6</priority>
+    </url>`).join('');
+
+        res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    ${urls}
+</urlset>`);
+    } catch (err) {
+        res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+    }
+});
+
+// NEW: Video sitemap using the proper Google video-sitemap extension, so
+// individual video pages are eligible for video rich results — not just
+// listed as plain URLs. Pulls the latest videos live (short cache) since
+// this list changes constantly.
+app.get('/sitemap-videos.xml', async (req, res) => {
+    res.header('Content-Type', 'application/xml');
+    try {
+        const data = await cachedGet('sitemap:videos', 'https://www.eporner.com/api/v2/video/search/?order=latest&per_page=100&thumbsize=big&hd=1');
+        const videos = data.videos || [];
+
+        const urls = videos.map(v => `
+    <url>
+        <loc>${DOMAIN}/video/${v.id}/${toSlug(v.title)}</loc>
+        <video:video>
+            <video:thumbnail_loc>${v.default_thumb.src}</video:thumbnail_loc>
+            <video:title><![CDATA[${v.title}]]></video:title>
+            <video:description><![CDATA[${v.title}]]></video:description>
+            <video:duration>${v.length_sec || ''}</video:duration>
+        </video:video>
+    </url>`).join('');
+
+        res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+    ${urls}
+</urlset>`);
+    } catch (err) {
+        res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+    }
 });
 
 module.exports = app;
