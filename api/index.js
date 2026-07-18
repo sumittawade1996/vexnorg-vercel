@@ -106,6 +106,27 @@ function safeOrder(order) {
     return SORT_OPTIONS.some(o => o.value === order) ? order : 'top-weekly';
 }
 
+const PER_PAGE = 40;
+
+function safePage(page) {
+    const n = parseInt(page, 10);
+    return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
+// Renders Prev/Next as real crawlable links. Since the eporner API doesn't
+// reliably return a total-page count, "Next" just checks whether this page
+// came back full (a full page means there's likely more).
+function renderPagination(basePath, order, page, hasMore) {
+    const qs = (p) => `?order=${order}&page=${p}`;
+    const prev = page > 1
+        ? `<a href="${basePath}${qs(page - 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">← Prev</a>`
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-600 text-xs">← Prev</span>`;
+    const next = hasMore
+        ? `<a href="${basePath}${qs(page + 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">Next →</a>`
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-600 text-xs">Next →</span>`;
+    return `<div class="flex items-center justify-between mt-6"><span class="text-xs text-slate-500 font-mono">Page ${page}</span><div class="flex gap-2">${prev}${next}</div></div>`;
+}
+
 // -------------------------------------------------------------
 // 2. SIMPLE IN-MEMORY CACHE
 // -------------------------------------------------------------
@@ -131,11 +152,37 @@ async function cachedGet(key, url) {
 // -------------------------------------------------------------
 // 3. HTML SSR TEMPLATE
 // -------------------------------------------------------------
-const AD_SLOT_HTML = `
-    <div class="bg-slate-900/40 rounded-lg p-3 border border-slate-800 flex items-center justify-center col-span-1 min-h-[250px]">
-        <span class="text-[9px] font-mono text-slate-600 uppercase">Ad slot — insert vetted network embed here</span>
+
+// AD PLACEMENTS — added per your request. All four point to the same ad
+// network domain; see my note in chat about the smartlink specifically.
+const SOCIAL_BAR_SCRIPT = `<script src="https://supportiveinvoicevarnish.com/f0/10/13/f010135b24ae94e9bf9be88f3d51e2ed.js"></script>`;
+
+const NATIVE_BANNER_HTML = `
+    <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
+        <span class="text-[9px] font-mono text-slate-600 uppercase mb-1">Sponsored</span>
+        <div id="container-5de161d2a3fd4a9ee2823cd1195c61f7"></div>
+        <script async="async" data-cfasync="false" src="https://supportiveinvoicevarnish.com/5de161d2a3fd4a9ee2823cd1195c61f7/invoke.js"></script>
     </div>
 `;
+
+// 320x50 banner — placed once near the top of every page, right under the
+// header, so it gets seen without needing an ad slot per 4 videos.
+const TOP_BANNER_HTML = `
+    <div class="w-full flex justify-center py-2 bg-slate-950">
+        <script>
+            atOptions = {
+                'key' : '2260e6c38ea6fb994bedaf818bff091f',
+                'format' : 'iframe',
+                'height' : 50,
+                'width' : 320,
+                'params' : {}
+            };
+        </script>
+        <script src="https://supportiveinvoicevarnish.com/2260e6c38ea6fb994bedaf818bff091f/invoke.js"></script>
+    </div>
+`;
+
+const SMARTLINK_URL = 'https://supportiveinvoicevarnish.com/twknxez5h?key=71a6af98250d13d68564c79bdc53854e';
 
 function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd, robotsMeta }) {
     return `<!DOCTYPE html>
@@ -143,6 +190,15 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEARCH ENGINE WEBMASTER VERIFICATION SECTIONS -->
+    <!-- Replace the content="" values below with the real codes Google Search
+         Console / Bing Webmaster Tools give YOU after you add vexn.org as a
+         property in your own account. A code generated for someone else's
+         account/site won't do anything useful here. -->
+    <meta name="google-site-verification" content="REPLACE_WITH_YOUR_GOOGLE_CODE">
+    <meta name="msvalidate.01" content="REPLACE_WITH_YOUR_BING_CODE">
+
     <title>${title}</title>
     <meta name="description" content="${description}">
     <meta name="keywords" content="${keywords}">
@@ -161,12 +217,23 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <meta name="twitter:description" content="${description}">
 
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
     ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ''}
+    ${SOCIAL_BAR_SCRIPT}
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
     <header class="bg-slate-900 border-b border-slate-800 p-3 sm:p-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
             <a href="/" class="text-xl sm:text-2xl font-black text-red-500 text-center sm:text-left">STREAM<span class="text-white">HUB</span>ELITE</a>
+
+            <a href="${SMARTLINK_URL}" target="_blank" rel="noopener noreferrer" class="bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 font-black text-[11px] sm:text-xs px-4 py-1.5 rounded-full uppercase tracking-wider shadow-lg flex items-center gap-1.5 justify-center">
+                <span>🔥 Get Free Brazzers Subscription</span>
+                <span class="bg-slate-950 text-amber-400 text-[9px] px-1.5 py-0.5 rounded-full font-bold">CLAIM NOW</span>
+            </a>
+
             <div class="flex gap-2 items-center w-full sm:w-auto">
                 <form action="/search" method="GET" class="flex gap-2 flex-grow sm:flex-grow-0">
                     <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
@@ -176,6 +243,8 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
             </div>
         </div>
     </header>
+
+    ${TOP_BANNER_HTML}
 
     <main class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8 flex-grow w-full">
         ${contentHtml}
@@ -188,8 +257,6 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <script>
         // CHANGE: Favorites stored ONLY in the visitor's own browser
         // (localStorage) — never sent to the server, no account needed.
-        // This is a real feature port from the file you uploaded, minus
-        // any ad code.
         function getFavorites() {
             try { return JSON.parse(localStorage.getItem('streamhub_favs')) || []; }
             catch (e) { return []; }
@@ -222,6 +289,22 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 </html>`;
 }
 
+// CHANGE: Renders category/performer/keyword links as a horizontal slider
+// (like the filter rows in your uploaded file) instead of a wrapping block
+// — sits at the TOP of the page content so visitors don't have to scroll
+// down to see them.
+function renderSlider(label, items, hrefBuilder) {
+    const links = items.map(item => `
+        <a href="${hrefBuilder(item)}" class="shrink-0 px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
+    `).join('');
+    return `
+        <div class="mb-4">
+            <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">${label}</span>
+            <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${links}</div>
+        </div>
+    `;
+}
+
 function renderVideoGrid(videos) {
     let html = '';
     videos.forEach((v, index) => {
@@ -240,7 +323,7 @@ function renderVideoGrid(videos) {
             </div>
         `;
         if ((index + 1) % 4 === 0) {
-            html += AD_SLOT_HTML;
+            html += NATIVE_BANNER_HTML;
         }
     });
     return html;
@@ -268,25 +351,18 @@ app.get('/', async (req, res) => {
         const trendingVideos = trendingRes.status === 'fulfilled' ? (trendingRes.value.videos || []) : [];
         const latestVideos = latestRes.status === 'fulfilled' ? (latestRes.value.videos || []) : [];
 
-        const categoryLinks = CATEGORIES.map(c => `
-            <a href="/tag/${c.slug}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${c.label}</a>
-        `).join('');
-
-        const performerLinks = PERFORMERS.map(p => `
-            <a href="/star/${p.slug}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${p.label}</a>
-        `).join('');
-
         // CHANGE: Trending keyword cloud now pulls from all three real feeds
         // above (Brazzers + Trending + Latest) instead of just one, giving a
         // wider genuine pool before ranking by frequency.
         const topKeywords = extractTopKeywords([brazzersVideos, trendingVideos, latestVideos]);
         cache.set('trending-keywords', { data: topKeywords, time: Date.now() }); // reused by sitemap-keywords.xml
-        const keywordLinks = topKeywords.map(kw => `
-            <a href="/keyword/${toSlug(kw)}" class="px-2 py-1 bg-slate-900 border border-slate-800 text-xs rounded text-slate-300 hover:text-red-400">${kw}</a>
-        `).join('');
 
         const content = `
-            <div class="mb-8">
+            ${renderSlider('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
+            ${renderSlider('Performers', PERFORMERS, p => `/star/${p.slug}`)}
+            ${renderSlider('Trending Keywords', topKeywords.map(kw => ({ label: kw, slug: toSlug(kw) })), k => `/keyword/${k.slug}`)}
+
+            <div class="mb-8 mt-6">
                 <div class="flex justify-between items-center mb-4">
                     <h1 class="text-2xl font-bold text-red-500">Brazzers</h1>
                     <a href="/tag/brazzers" class="text-xs text-slate-400 hover:text-red-400">View all →</a>
@@ -303,15 +379,6 @@ app.get('/', async (req, res) => {
                 <h2 class="text-xl font-bold mb-4 text-slate-200">Latest Uploads</h2>
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos)}</div>
             </div>
-
-            <h2 class="text-lg font-bold mb-3 text-slate-400">Browse Categories</h2>
-            <div class="flex flex-wrap gap-2 mb-6">${categoryLinks}</div>
-
-            <h2 class="text-lg font-bold mb-3 text-slate-400">Browse Performers</h2>
-            <div class="flex flex-wrap gap-2 mb-6">${performerLinks}</div>
-
-            <h2 class="text-lg font-bold mb-3 text-slate-400">Trending Keywords</h2>
-            <div class="flex flex-wrap gap-2">${keywordLinks}</div>
         `;
 
         res.send(renderHTMLPage({
@@ -330,21 +397,25 @@ app.get('/tag/:slug', async (req, res) => {
     const category = findBySlug(CATEGORIES, req.params.slug);
     if (!category) return res.status(404).send('Category not found');
     const order = safeOrder(req.query.order);
+    const page = safePage(req.query.page);
 
     try {
         const data = await cachedGet(
-            `tag:${category.slug}:${order}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(category.label)}&order=${order}&per_page=24&thumbsize=big&hd=1`
+            `tag:${category.slug}:${order}:${page}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(category.label)}&order=${order}&page=${page}&per_page=${PER_PAGE}&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
+        const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+            ${renderSlider('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${category.label} Videos</h1>
                 <div class="flex gap-2">${renderSortLinks(`/tag/${category.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">${category.blurb}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
+            ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
@@ -364,21 +435,25 @@ app.get('/star/:slug', async (req, res) => {
     const performer = findBySlug(PERFORMERS, req.params.slug);
     if (!performer) return res.status(404).send('Performer not found');
     const order = safeOrder(req.query.order);
+    const page = safePage(req.query.page);
 
     try {
         const data = await cachedGet(
-            `star:${performer.slug}:${order}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(performer.label)}&order=${order}&per_page=24&thumbsize=big&hd=1`
+            `star:${performer.slug}:${order}:${page}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(performer.label)}&order=${order}&page=${page}&per_page=${PER_PAGE}&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
+        const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+            ${renderSlider('Performers', PERFORMERS, p => `/star/${p.slug}`)}
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${performer.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">${performer.blurb}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
+            ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
@@ -403,14 +478,16 @@ app.get('/keyword/:slug', async (req, res) => {
     const slug = req.params.slug;
     const term = fromSlug(slug);
     const order = safeOrder(req.query.order);
+    const page = safePage(req.query.page);
 
     try {
         const data = await cachedGet(
-            `keyword:${slug}:${order}`,
-            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(term)}&order=${order}&per_page=24&thumbsize=big&hd=1`
+            `keyword:${slug}:${order}:${page}`,
+            `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(term)}&order=${order}&page=${page}&per_page=${PER_PAGE}&thumbsize=big&hd=1`
         );
         const videos = data.videos || [];
         if (videos.length === 0) return res.status(404).send('No results for this keyword');
+        const hasMore = videos.length === PER_PAGE;
 
         const content = `
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
@@ -419,6 +496,7 @@ app.get('/keyword/:slug', async (req, res) => {
             </div>
             <p class="text-sm text-slate-400 mb-6">Currently trending clips matching "${term}".</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos)}</div>
+            ${renderPagination(`/keyword/${slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
