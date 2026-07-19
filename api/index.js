@@ -1,9 +1,32 @@
 const express = require('express');
 const axios = require('axios');
 const slugify = require('slugify');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const DOMAIN = 'https://vexn.org';
+
+// -------------------------------------------------------------
+// AI-generated unique SEO descriptions, keyed by "type:slug"
+// (e.g. "channel:brazzers", "tag:milf", "star:some-performer").
+// Loaded once at startup. If a key is missing (not yet generated,
+// or the file doesn't exist), falls back to the item's own .blurb
+// so pages never break — this is a progressive enhancement, not
+// a replacement.
+// -------------------------------------------------------------
+let PAGE_DESCRIPTIONS = {};
+try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'descriptions.json'), 'utf8');
+    PAGE_DESCRIPTIONS = JSON.parse(raw);
+} catch (err) {
+    PAGE_DESCRIPTIONS = {}; // file not generated yet — fine, blurb fallback covers it
+}
+
+function getDescription(type, slug, fallback) {
+    const key = `${type}:${slug}`;
+    return PAGE_DESCRIPTIONS[key] || fallback;
+}
 
 // -------------------------------------------------------------
 // 1. REAL DATA LISTS — parsed and deduplicated from an actual industry
@@ -1054,6 +1077,31 @@ const INLINE_BANNER_HTML = `
 // once). Additional buckets on the same page use `adType: 'banner'`
 // instead — the repeatable 320x50 unit — placed after every 4-5 videos as
 // requested.
+// NEW: A compact photo/thumbnail preview strip for channel, performer, and
+// category pages. Uses the SAME already-fetched `videos` array the page's
+// full grid uses below — no extra API call, and critically, no scraped
+// third-party photos. Every thumbnail comes straight from eporner's own
+// `default_thumb.src` field, the same licensed source already used
+// site-wide. This exists purely to give the page a visual "here's what
+// this channel/performer/category actually looks like" preview right up
+// top, before the description and full grid.
+function renderPreviewStrip(videos, count = 6) {
+    const preview = videos.slice(0, count);
+    if (preview.length === 0) return '';
+    const thumbs = preview.map(v => {
+        const href = `/video/${v.id}/${toSlug(v.title)}`;
+        return `
+            <a href="${href}" class="flex-shrink-0 w-28 sm:w-32">
+                <img src="${v.default_thumb.src}" alt="${v.title}" class="w-28 sm:w-32 h-20 object-cover rounded-md border border-slate-800" loading="lazy">
+            </a>`;
+    }).join('');
+    return `
+        <div class="flex gap-2 overflow-x-auto pb-3 mb-4 -mx-1 px-1">
+            ${thumbs}
+        </div>
+    `;
+}
+
 function renderVideoGrid(videos, adType = 'none') {
     let html = '';
     let nativeAdPlaced = false;
@@ -1172,14 +1220,15 @@ app.get('/tag/:slug', async (req, res) => {
                 <h1 class="text-2xl font-bold text-red-500">${category.label} Videos</h1>
                 <div class="flex gap-2">${renderSortLinks(`/tag/${category.slug}`, order)}</div>
             </div>
-            <p class="text-sm text-slate-400 mb-6">${category.blurb}</p>
+            <p class="text-sm text-slate-400 mb-2">${getDescription('tag', category.slug, category.blurb)}</p>
+            ${renderPreviewStrip(videos)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
             title: `Watch ${category.label} HD Streaming Clips - StreamHub Elite`,
-            description: category.blurb,
+            description: getDescription('tag', category.slug, category.blurb),
             keywords: `${category.label}, adult videos, hd streaming`,
             canonicalPath: `/tag/${category.slug}`,
             contentHtml: content
@@ -1212,14 +1261,15 @@ app.get('/channel/:slug', async (req, res) => {
                 <h1 class="text-2xl font-bold text-red-500">${channel.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/channel/${channel.slug}`, order)}</div>
             </div>
-            <p class="text-sm text-slate-400 mb-6">${channel.blurb}</p>
+            <p class="text-sm text-slate-400 mb-2">${getDescription('channel', channel.slug, channel.blurb)}</p>
+            ${renderPreviewStrip(videos)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
             title: `${channel.label} Videos - HD Streaming - StreamHub Elite`,
-            description: channel.blurb,
+            description: getDescription('channel', channel.slug, channel.blurb),
             keywords: `${channel.label}, adult videos, hd streaming`,
             canonicalPath: `/channel/${channel.slug}`,
             contentHtml: content
@@ -1251,14 +1301,15 @@ app.get('/star/:slug', async (req, res) => {
                 <h1 class="text-2xl font-bold text-red-500">${performer.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
             </div>
-            <p class="text-sm text-slate-400 mb-6">${performer.blurb}</p>
+            <p class="text-sm text-slate-400 mb-2">${getDescription('star', performer.slug, performer.blurb)}</p>
+            ${renderPreviewStrip(videos)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
         `;
 
         res.send(renderHTMLPage({
             title: `${performer.label} - HD Videos - StreamHub Elite`,
-            description: performer.blurb,
+            description: getDescription('star', performer.slug, performer.blurb),
             keywords: `${performer.label}, adult videos, hd streaming`,
             canonicalPath: `/star/${performer.slug}`,
             contentHtml: content
@@ -1583,3 +1634,9 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
 });
 
 module.exports = app;
+// Exposed so scripts/generate-descriptions.js can reuse the exact same
+// lists without duplicating them. Attaching properties to an Express app
+// (a function) doesn't change how Vercel invokes it as a request handler.
+module.exports.CHANNELS = CHANNELS;
+module.exports.CATEGORIES = CATEGORIES;
+module.exports.PERFORMERS = PERFORMERS;
