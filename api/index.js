@@ -29,6 +29,34 @@ function getDescription(type, slug, fallback) {
 }
 
 // -------------------------------------------------------------
+// Performer "About" bio paragraphs — separate file from descriptions.json
+// on purpose, since these are a different content type (longer, personal-
+// adjacent copy vs. the short catalog-page description). Deliberately
+// generic and non-personal: no invented age, real name, nationality, or
+// biographical claims about a real individual — see project notes.
+// Missing entries simply render nothing (no section shown), never a
+// fabricated fallback.
+// -------------------------------------------------------------
+let PERFORMER_BIOS = {};
+try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'performer-bios.json'), 'utf8');
+    PERFORMER_BIOS = JSON.parse(raw);
+} catch (err) {
+    PERFORMER_BIOS = {};
+}
+
+function renderBioSection(slug) {
+    const bio = PERFORMER_BIOS[slug];
+    if (!bio) return '';
+    return `
+        <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4 mb-4">
+            <h2 class="text-sm font-bold text-slate-300 mb-1 uppercase tracking-wide">About</h2>
+            <p class="text-sm text-slate-400">${bio}</p>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------
 // 1. REAL DATA LISTS — parsed and deduplicated from an actual industry
 // taxonomy list you provided (performers, channels/studios, categories).
 // Every entry here maps to a real search query against the API, backed by
@@ -1302,6 +1330,7 @@ app.get('/star/:slug', async (req, res) => {
                 <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-2">${getDescription('star', performer.slug, performer.blurb)}</p>
+            ${renderBioSection(performer.slug)}
             ${renderPreviewStrip(videos)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
