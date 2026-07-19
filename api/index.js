@@ -987,10 +987,10 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 </html>`;
 }
 
-// CHANGE: Renders category/performer/keyword links as a horizontal slider
-// (like the filter rows in your uploaded file) instead of a wrapping block
-// — sits at the TOP of the page content so visitors don't have to scroll
-// down to see them.
+// CHANGE: Renders category/performer/keyword links as a horizontal slider.
+// Kept ONLY for Trending Keywords now — Channels/Categories/Performers
+// moved to renderAccordion() below (per your request, only keywords stay
+// pinned at the top).
 function renderSlider(label, items, hrefBuilder) {
     const links = items.map(item => `
         <a href="${hrefBuilder(item)}" class="shrink-0 px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
@@ -1003,17 +1003,60 @@ function renderSlider(label, items, hrefBuilder) {
     `;
 }
 
+// NEW: Collapsible "slide down" section using native <details>/<summary> —
+// no JS needed, works reliably on mobile, and browsers handle the
+// open/close animation and accessibility for free. Tapping the heading
+// (Channels / Categories / Performers) expands a wrapped grid of every
+// item instead of always showing a long scroll — much better for phones,
+// since collapsed state means the page starts short.
+function renderAccordion(label, items, hrefBuilder) {
+    const links = items.map(item => `
+        <a href="${hrefBuilder(item)}" class="px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
+    `).join('');
+    return `
+        <details class="mb-3 bg-slate-900/40 border border-slate-800 rounded-lg">
+            <summary class="cursor-pointer select-none px-4 py-3 text-sm font-bold text-slate-200 flex items-center justify-between">
+                <span>${label} <span class="text-slate-500 font-normal">(${items.length})</span></span>
+                <span class="text-slate-500 text-xs">tap to expand ▾</span>
+            </summary>
+            <div class="flex flex-wrap gap-2 p-4 pt-0">${links}</div>
+        </details>
+    `;
+}
+
+// NEW: Small repeatable banner ad for grid buckets beyond the first. Uses
+// the SAME 320x50 ad unit as the top/bottom banners — safe to repeat
+// because it's script-driven (atOptions + invoke.js), not tied to a fixed
+// container ID like the native banner is. This is how "an ad after every
+// bucket" is achieved without recreating the blank-native-ad bug.
+const INLINE_BANNER_HTML = `
+    <div class="col-span-1 min-h-[80px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
+        <span class="text-[9px] font-mono text-slate-600 uppercase mb-1">Sponsored</span>
+        <script>
+            atOptions = {
+                'key' : '2260e6c38ea6fb994bedaf818bff091f',
+                'format' : 'iframe',
+                'height' : 50,
+                'width' : 320,
+                'params' : {}
+            };
+        </script>
+        <script src="https://supportiveinvoicevarnish.com/2260e6c38ea6fb994bedaf818bff091f/invoke.js"></script>
+    </div>
+`;
+
 // BUGFIX: The native banner div uses a FIXED container ID
 // (container-5de161d2a3fd4a9ee2823cd1195c61f7), and HTML IDs must be
 // unique per page. The ad network's script locates its container by that
 // ID — only the FIRST occurrence on the page is ever recognized; every
-// repeat after that renders an empty div forever. That's the exact "works
-// on first slots then blank" bug. Fix: render it at most ONCE per page,
-// controlled explicitly by the caller via `includeNativeAd`, never
-// automatically repeated every 4 items.
-function renderVideoGrid(videos, includeNativeAd = false) {
+// repeat after that renders an empty div forever. Fix: it can appear AT
+// MOST once per page (controlled by `adType: 'native'`, only take effect
+// once). Additional buckets on the same page use `adType: 'banner'`
+// instead — the repeatable 320x50 unit — placed after every 4-5 videos as
+// requested.
+function renderVideoGrid(videos, adType = 'none') {
     let html = '';
-    let adPlaced = false;
+    let nativeAdPlaced = false;
     videos.forEach((v, index) => {
         const href = `/video/${v.id}/${toSlug(v.title)}`;
         const safeTitle = v.title.replace(/'/g, "\\'");
@@ -1029,9 +1072,12 @@ function renderVideoGrid(videos, includeNativeAd = false) {
                 </a>
             </div>
         `;
-        if (includeNativeAd && !adPlaced && (index + 1) % 4 === 0) {
+        const atSlotPosition = (index + 1) % 5 === 0; // after every 5th video
+        if (adType === 'native' && !nativeAdPlaced && atSlotPosition) {
             html += NATIVE_BANNER_HTML;
-            adPlaced = true;
+            nativeAdPlaced = true;
+        } else if (adType === 'banner' && atSlotPosition) {
+            html += INLINE_BANNER_HTML;
         }
     });
     return html;
@@ -1066,28 +1112,29 @@ app.get('/', async (req, res) => {
         cache.set('trending-keywords', { data: topKeywords, time: Date.now() }); // reused by sitemap-keywords.xml
 
         const content = `
-            ${renderSlider('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
-            ${renderSlider('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
-            ${renderSlider('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
-            ${renderSlider('Performers', PERFORMERS, p => `/star/${p.slug}`)}
             ${renderSlider('Trending Keywords', topKeywords.map(kw => ({ label: kw, slug: toSlug(kw) })), k => `/keyword/${k.slug}`)}
+
+            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
+            ${renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
+            ${renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
+            ${renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`)}
 
             <div class="mb-8 mt-6">
                 <div class="flex justify-between items-center mb-4">
                     <h1 class="text-2xl font-bold text-red-500">Brazzers</h1>
                     <a href="/channel/brazzers" class="text-xs text-slate-400 hover:text-red-400">View all →</a>
                 </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(brazzersVideos)}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(brazzersVideos, 'native')}</div>
             </div>
 
             <div class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-slate-200">Trending This Week</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(trendingVideos, true)}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(trendingVideos, 'banner')}</div>
             </div>
 
             <div class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-slate-200">Latest Uploads</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos)}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos, 'banner')}</div>
             </div>
         `;
 
@@ -1118,15 +1165,15 @@ app.get('/tag/:slug', async (req, res) => {
         const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            ${renderSlider('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
-            ${renderSlider('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
-            ${renderSlider('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
+            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
+            ${renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
+            ${renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${category.label} Videos</h1>
                 <div class="flex gap-2">${renderSortLinks(`/tag/${category.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">${category.blurb}</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, true)}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
         `;
 
@@ -1160,13 +1207,13 @@ app.get('/channel/:slug', async (req, res) => {
         const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            ${renderSlider('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
+            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${channel.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/channel/${channel.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">${channel.blurb}</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, true)}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
         `;
 
@@ -1198,14 +1245,14 @@ app.get('/star/:slug', async (req, res) => {
         const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            ${renderSlider('Performers', PERFORMERS, p => `/star/${p.slug}`)}
-            ${renderSlider('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
+            ${renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`)}
+            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${performer.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">${performer.blurb}</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, true)}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
         `;
 
@@ -1248,7 +1295,7 @@ app.get('/keyword/:slug', async (req, res) => {
                 <div class="flex gap-2">${renderSortLinks(`/keyword/${slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">Currently trending clips matching "${term}".</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, true)}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/keyword/${slug}`, order, page, hasMore)}
         `;
 
