@@ -1640,16 +1640,28 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
         );
         const videos = data.videos || [];
 
-        const urls = videos.map(v => `
+        const urls = videos.map(v => {
+            // video:duration is OPTIONAL in Google's video sitemap spec and
+            // must be a whole number of seconds between 1 and 28800 (8 hrs)
+            // if present at all. Previously this printed an empty/invalid
+            // tag whenever length_sec was missing or 0 — that's exactly
+            // what Search Console was flagging. Fix: validate first, and
+            // only include the tag when it's actually valid.
+            const rawDuration = Math.round(Number(v.length_sec));
+            const hasValidDuration = Number.isFinite(rawDuration) && rawDuration >= 1 && rawDuration <= 28800;
+            const durationTag = hasValidDuration ? `<video:duration>${rawDuration}</video:duration>` : '';
+
+            return `
     <url>
         <loc>${DOMAIN}/video/${v.id}/${toSlug(v.title)}</loc>
         <video:video>
             <video:thumbnail_loc>${v.default_thumb.src}</video:thumbnail_loc>
             <video:title><![CDATA[${v.title}]]></video:title>
             <video:description><![CDATA[${v.title}]]></video:description>
-            <video:duration>${v.length_sec || ''}</video:duration>
+            ${durationTag}
         </video:video>
-    </url>`).join('');
+    </url>`;
+        }).join('');
 
         res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
