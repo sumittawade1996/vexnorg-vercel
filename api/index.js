@@ -1467,25 +1467,41 @@ app.get('/video/:id/:slug?', async (req, res) => {
             contentUrl: video.url || undefined
         };
 
-        // Fetch related videos using the video's own keywords, so results
-        // are genuinely related rather than random. Falls back to the
-        // video's title if no keywords field is present. Failure here
-        // should never break the main video page, so it's wrapped
-        // separately and defaults to an empty list on error.
+        // Fetch related videos using the video's own keywords. Previously
+        // this only tried ONE query (first keyword, or title if no
+        // keywords) — if that specific query happened to return few or
+        // zero OTHER videos (e.g. a rare keyword, or a query that mostly
+        // matched the current video itself), the section silently came
+        // up empty. Fixed by trying several candidate queries in order
+        // and using the first one that actually returns enough results.
+        const keywordList = (video.keywords || '')
+            .split(',')
+            .map(k => k.trim())
+            .filter(Boolean);
+        const candidateQueries = [
+            ...keywordList.slice(0, 3),   // try up to 3 real keywords first
+            video.title,                   // then fall back to the title
+            'trending'                      // last resort: never show an empty section
+        ].filter(Boolean);
+
         let relatedVideos = [];
-        try {
-            const relatedQuery = (video.keywords || video.title || '').split(',')[0].trim();
-            if (relatedQuery) {
+        for (const candidate of candidateQueries) {
+            try {
                 const relatedData = await cachedGet(
-                    `related:${relatedQuery}`,
-                    `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(relatedQuery)}&order=top-rated&per_page=6&thumbsize=big&hd=1`
+                    `related:${candidate}`,
+                    `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(candidate)}&order=top-rated&per_page=8&thumbsize=big&hd=1`
                 );
-                relatedVideos = (relatedData.videos || [])
-                    .filter(v => String(v.id) !== String(id))
-                    .slice(0, 5);
+                const filtered = (relatedData.videos || []).filter(v => String(v.id) !== String(id));
+                if (filtered.length >= 5) {
+                    relatedVideos = filtered.slice(0, 5);
+                    break; // good enough — stop trying further candidates
+                }
+                if (filtered.length > relatedVideos.length) {
+                    relatedVideos = filtered.slice(0, 5); // keep the best partial result so far
+                }
+            } catch (err) {
+                // this candidate failed — just move on to the next one
             }
-        } catch (err) {
-            relatedVideos = []; // related videos are a bonus, not critical
         }
 
         const relatedHtml = relatedVideos.length > 0 ? `
@@ -1494,6 +1510,21 @@ app.get('/video/:id/:slug?', async (req, res) => {
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                     ${renderVideoGrid(relatedVideos, 'none')}
                 </div>
+            </div>
+        ` : '';
+
+        // NEW: visible, clickable keyword tags on the video page itself —
+        // this was requested alongside the related-videos section but
+        // previously only used internally for the search query above,
+        // never actually shown to visitors. Each tag links to /search,
+        // which already resolves to the matching /tag/, /star/, or
+        // /channel/ page when one exists, or a live /keyword/ page
+        // otherwise — so every tag is a real, working link either way.
+        const keywordTagsHtml = keywordList.length > 0 ? `
+            <div class="flex flex-wrap gap-2 mb-6">
+                ${keywordList.slice(0, 12).map(kw => `
+                    <a href="/search?q=${encodeURIComponent(kw)}" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-full border border-slate-700 transition-colors">${kw}</a>
+                `).join('')}
             </div>
         ` : '';
 
@@ -1506,6 +1537,7 @@ app.get('/video/:id/:slug?', async (req, res) => {
                 <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 mb-6">
                     <p class="text-xs text-slate-400 font-mono">Duration: ${video.length_min} mins | Rating: ★ ${video.rate || '4.8'}</p>
                 </div>
+                ${keywordTagsHtml}
                 ${NATIVE_BANNER_HTML}
                 ${relatedHtml}
             </div>
