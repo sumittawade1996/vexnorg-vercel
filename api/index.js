@@ -1467,6 +1467,36 @@ app.get('/video/:id/:slug?', async (req, res) => {
             contentUrl: video.url || undefined
         };
 
+        // Fetch related videos using the video's own keywords, so results
+        // are genuinely related rather than random. Falls back to the
+        // video's title if no keywords field is present. Failure here
+        // should never break the main video page, so it's wrapped
+        // separately and defaults to an empty list on error.
+        let relatedVideos = [];
+        try {
+            const relatedQuery = (video.keywords || video.title || '').split(',')[0].trim();
+            if (relatedQuery) {
+                const relatedData = await cachedGet(
+                    `related:${relatedQuery}`,
+                    `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(relatedQuery)}&order=top-rated&per_page=6&thumbsize=big&hd=1`
+                );
+                relatedVideos = (relatedData.videos || [])
+                    .filter(v => String(v.id) !== String(id))
+                    .slice(0, 5);
+            }
+        } catch (err) {
+            relatedVideos = []; // related videos are a bonus, not critical
+        }
+
+        const relatedHtml = relatedVideos.length > 0 ? `
+            <div class="mt-8">
+                <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wide">Related Videos</h2>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                    ${renderVideoGrid(relatedVideos, 'none')}
+                </div>
+            </div>
+        ` : '';
+
         const content = `
             <div class="max-w-4xl mx-auto">
                 <h1 class="text-xl font-bold mb-4 text-slate-100">${video.title}</h1>
@@ -1477,6 +1507,7 @@ app.get('/video/:id/:slug?', async (req, res) => {
                     <p class="text-xs text-slate-400 font-mono">Duration: ${video.length_min} mins | Rating: ★ ${video.rate || '4.8'}</p>
                 </div>
                 ${NATIVE_BANNER_HTML}
+                ${relatedHtml}
             </div>
         `;
 
