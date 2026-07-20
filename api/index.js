@@ -964,6 +964,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <meta name="twitter:description" content="${description}">
 
     <script src="https://cdn.tailwindcss.com"></script>
+    ${HOVER_PREVIEW_SCRIPT}
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -1136,11 +1137,20 @@ function renderVideoGrid(videos, adType = 'none') {
     videos.forEach((v, index) => {
         const href = `/video/${v.id}/${toSlug(v.title)}`;
         const safeTitle = v.title.replace(/'/g, "\\'");
+        // Hover-to-preview: only wired up when the API result actually
+        // includes an embed URL (some endpoints do, some don't) — if it's
+        // missing, the thumbnail just behaves as a normal static image,
+        // never a broken preview.
+        const hoverAttrs = v.embed
+            ? `onmouseenter="playHoverPreview(this, '${v.embed}')" onmouseleave="stopHoverPreview(this)"`
+            : '';
         html += `
-            <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800 relative">
+            <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800 relative" ${hoverAttrs}>
                 <button data-fav-id="${v.id}" onclick="toggleFavorite('${v.id}', '${safeTitle}', '${v.default_thumb.src}', '${href}')" class="absolute top-2 right-2 z-10 w-7 h-7 bg-slate-950/80 rounded-lg flex items-center justify-center text-sm border border-slate-800">♡</button>
                 <a href="${href}">
-                    <img src="${v.default_thumb.src}" alt="${v.title}" class="w-full h-48 object-cover" loading="lazy">
+                    <div class="relative w-full h-48 preview-thumb-wrap">
+                        <img src="${v.default_thumb.src}" alt="${v.title}" class="w-full h-48 object-cover" loading="lazy">
+                    </div>
                     <div class="p-3">
                         <h2 class="text-sm font-bold truncate text-slate-200">${v.title}</h2>
                         <span class="text-xs text-slate-400 font-mono">${v.length_min} mins</span>
@@ -1158,6 +1168,37 @@ function renderVideoGrid(videos, adType = 'none') {
     });
     return html;
 }
+
+// Hover-preview script, injected once site-wide (see renderHTMLPage).
+// On mouseenter, swaps the static thumbnail for a muted, autoplaying
+// iframe using the video's own embed URL — same behavior as eporner's
+// own hover-to-preview. On mouseleave, removes the iframe and restores
+// the static thumbnail, so nothing keeps playing/loading in the
+// background once the visitor moves on.
+const HOVER_PREVIEW_SCRIPT = `
+<script>
+function playHoverPreview(card, embedUrl) {
+    if (card.dataset.previewActive) return;
+    card.dataset.previewActive = '1';
+    const wrap = card.querySelector('.preview-thumb-wrap');
+    if (!wrap) return;
+    const iframe = document.createElement('iframe');
+    iframe.src = embedUrl;
+    iframe.className = 'absolute inset-0 w-full h-full border-0';
+    iframe.setAttribute('allow', 'autoplay; fullscreen');
+    iframe.setAttribute('muted', 'true');
+    iframe.dataset.hoverPreview = '1';
+    wrap.appendChild(iframe);
+}
+function stopHoverPreview(card) {
+    delete card.dataset.previewActive;
+    const wrap = card.querySelector('.preview-thumb-wrap');
+    if (!wrap) return;
+    const frame = wrap.querySelector('[data-hover-preview]');
+    if (frame) frame.remove();
+}
+</script>
+`;
 
 // -------------------------------------------------------------
 // 4. ROUTES
@@ -1467,21 +1508,31 @@ app.get('/video/:id/:slug?', async (req, res) => {
             contentUrl: video.url || undefined
         };
 
-        // Fetch related videos using the video's own keywords. Previously
-        // this only tried ONE query (first keyword, or title if no
-        // keywords) — if that specific query happened to return few or
-        // zero OTHER videos (e.g. a rare keyword, or a query that mostly
-        // matched the current video itself), the section silently came
-        // up empty. Fixed by trying several candidate queries in order
-        // and using the first one that actually returns enough results.
+        // Fetch related videos, prioritized as requested:
+        //   1. Same performer (if the video's title/keywords match a known
+        //      performer), trending order
+        //   2. Same category (if matched against known categories), trending
+        //   3. Real keywords from the video itself
+        //   4. The video's own title
+        //   5. Generic 'trending' — last resort, never show an empty section
+        // Each candidate is tried until one returns enough results, exactly
+        // like before — this just changes WHICH queries get tried first,
+        // and switches to trending (order=top-weekly) per your request.
         const keywordList = (video.keywords || '')
             .split(',')
             .map(k => k.trim())
             .filter(Boolean);
+
+        const haystack = `${video.title} ${video.keywords || ''}`.toLowerCase();
+        const matchedPerformer = PERFORMERS.find(p => haystack.includes(p.label.toLowerCase()));
+        const matchedCategory = CATEGORIES.find(c => haystack.includes(c.label.toLowerCase()));
+
         const candidateQueries = [
-            ...keywordList.slice(0, 3),   // try up to 3 real keywords first
-            video.title,                   // then fall back to the title
-            'trending'                      // last resort: never show an empty section
+            matchedPerformer ? matchedPerformer.label : null,
+            matchedCategory ? matchedCategory.label : null,
+            ...keywordList.slice(0, 3),
+            video.title,
+            'trending'
         ].filter(Boolean);
 
         let relatedVideos = [];
@@ -1489,7 +1540,7 @@ app.get('/video/:id/:slug?', async (req, res) => {
             try {
                 const relatedData = await cachedGet(
                     `related:${candidate}`,
-                    `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(candidate)}&order=top-rated&per_page=8&thumbsize=big&hd=1`
+                    `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(candidate)}&order=top-weekly&per_page=8&thumbsize=big&hd=1`
                 );
                 const filtered = (relatedData.videos || []).filter(v => String(v.id) !== String(id));
                 if (filtered.length >= 5) {
