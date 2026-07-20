@@ -1615,16 +1615,22 @@ app.get('/sitemap-keywords.xml', async (req, res) => {
     }
 });
 
-// NEW: Video sitemaps are now PAGINATED — /sitemap-videos-1.xml,
-// /sitemap-videos-2.xml, etc. Each file holds up to VIDEO_PER_PAGE videos
-// (well under the sitemap protocol's 50,000-URL-per-file limit), pulled
-// from a real API page (page=N), so every URL still maps to a real,
-// distinct video with its own thumbnail/duration/embed — this is real
-// content-backed scale, not manufactured pages. VIDEO_SITEMAP_PAGES
-// controls how many numbered files exist; raise it as your real traffic/
-// API budget allows.
-const VIDEO_PER_PAGE = 100;
-const VIDEO_SITEMAP_PAGES = 20; // 20 x 100 = 2,000 real video URLs total
+// NEW: Video sitemaps are PAGINATED — /sitemap-videos-1.xml,
+// /sitemap-videos-2.xml, etc. Each file holds up to
+// URLS_PER_SITEMAP_FILE real videos, assembled from several underlying
+// eporner API pages (VIDEO_API_PER_PAGE each). Real, content-backed
+// scale, not manufactured pages.
+//
+// Performance note: each sitemap file needs API_PAGES_PER_FILE upstream
+// API calls. These are fired in PARALLEL (Promise.all) rather than
+// sequentially, and each individual API page is cached on its own via
+// cachedGet (10 min TTL) — so the first crawl of a given file pays the
+// full latency once, and any crawl within the next 10 minutes (retries,
+// re-fetches, or Google re-checking) is served instantly from cache.
+const VIDEO_API_PER_PAGE = 100;
+const URLS_PER_SITEMAP_FILE = 1000;
+const API_PAGES_PER_FILE = URLS_PER_SITEMAP_FILE / VIDEO_API_PER_PAGE; // 10
+const VIDEO_SITEMAP_PAGES = 40; // 40 x 1,000 = 40,000 real video URLs total
 
 app.get('/sitemap-videos-:page.xml', async (req, res) => {
     res.header('Content-Type', 'application/xml');
@@ -1634,19 +1640,36 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
     }
 
     try {
-        const data = await cachedGet(
-            `sitemap:videos:${page}`,
-            `https://www.eporner.com/api/v2/video/search/?order=latest&page=${page}&per_page=${VIDEO_PER_PAGE}&thumbsize=big&hd=1`
-        );
-        const videos = data.videos || [];
+        // Map this sitemap file to its underlying eporner API page range.
+        // e.g. sitemap file 1 -> API pages 1-10, file 2 -> API pages 11-20.
+        const firstApiPage = (page - 1) * API_PAGES_PER_FILE + 1;
+        const apiPages = Array.from({ length: API_PAGES_PER_FILE }, (_, i) => firstApiPage + i);
+
+        const results = await Promise.all(apiPages.map(apiPage =>
+            cachedGet(
+                `sitemap:videos:${apiPage}`,
+                `https://www.eporner.com/api/v2/video/search/?order=latest&page=${apiPage}&per_page=${VIDEO_API_PER_PAGE}&thumbsize=big&hd=1`
+            ).catch(() => ({ videos: [] })) // one failed sub-page shouldn't break the whole file
+        ));
+
+        // Flatten and de-dupe by video id (defensive — API pagination
+        // shouldn't overlap, but duplicate <loc> entries are their own
+        // Search Console warning, so guard against it anyway).
+        const seen = new Set();
+        const videos = [];
+        for (const data of results) {
+            for (const v of (data.videos || [])) {
+                if (!seen.has(v.id)) {
+                    seen.add(v.id);
+                    videos.push(v);
+                }
+            }
+        }
 
         const urls = videos.map(v => {
             // video:duration is OPTIONAL in Google's video sitemap spec and
             // must be a whole number of seconds between 1 and 28800 (8 hrs)
-            // if present at all. Previously this printed an empty/invalid
-            // tag whenever length_sec was missing or 0 — that's exactly
-            // what Search Console was flagging. Fix: validate first, and
-            // only include the tag when it's actually valid.
+            // if present at all. Validate first, omit the tag if invalid.
             const rawDuration = Math.round(Number(v.length_sec));
             const hasValidDuration = Number.isFinite(rawDuration) && rawDuration >= 1 && rawDuration <= 28800;
             const durationTag = hasValidDuration ? `<video:duration>${rawDuration}</video:duration>` : '';
