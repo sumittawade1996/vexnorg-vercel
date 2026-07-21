@@ -16,16 +16,24 @@ const DOMAIN = 'https://vexn.org';
 // a replacement.
 // -------------------------------------------------------------
 let PAGE_DESCRIPTIONS = {};
+let PAGE_DESCRIPTIONS_MANUAL = {};
 try {
     const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'descriptions.json'), 'utf8');
     PAGE_DESCRIPTIONS = JSON.parse(raw);
 } catch (err) {
     PAGE_DESCRIPTIONS = {}; // file not generated yet — fine, blurb fallback covers it
 }
+try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'descriptions-manual.json'), 'utf8');
+    PAGE_DESCRIPTIONS_MANUAL = JSON.parse(raw);
+} catch (err) {
+    PAGE_DESCRIPTIONS_MANUAL = {}; // fine if it doesn't exist yet
+}
 
 function getDescription(type, slug, fallback) {
     const key = `${type}:${slug}`;
-    return PAGE_DESCRIPTIONS[key] || fallback;
+    // Priority: hand-written override > free generated text > old blurb
+    return PAGE_DESCRIPTIONS_MANUAL[key] || PAGE_DESCRIPTIONS[key] || fallback;
 }
 
 // -------------------------------------------------------------
@@ -38,15 +46,22 @@ function getDescription(type, slug, fallback) {
 // fabricated fallback.
 // -------------------------------------------------------------
 let PERFORMER_BIOS = {};
+let PERFORMER_BIOS_MANUAL = {};
 try {
     const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'performer-bios.json'), 'utf8');
     PERFORMER_BIOS = JSON.parse(raw);
 } catch (err) {
     PERFORMER_BIOS = {};
 }
+try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'performer-bios-manual.json'), 'utf8');
+    PERFORMER_BIOS_MANUAL = JSON.parse(raw);
+} catch (err) {
+    PERFORMER_BIOS_MANUAL = {}; // fine if it doesn't exist yet
+}
 
 function renderBioSection(slug) {
-    const bio = PERFORMER_BIOS[slug];
+    const bio = PERFORMER_BIOS_MANUAL[slug] || PERFORMER_BIOS[slug];
     if (!bio) return '';
     return `
         <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4 mb-4">
@@ -1066,13 +1081,26 @@ function renderAccordion(label, items, hrefBuilder) {
         <a href="${hrefBuilder(item)}" class="px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
     `).join('');
     return `
-        <details class="mb-3 bg-slate-900/40 border border-slate-800 rounded-lg">
-            <summary class="cursor-pointer select-none px-4 py-3 text-sm font-bold text-slate-200 flex items-center justify-between">
-                <span>${label} <span class="text-slate-500 font-normal">(${items.length})</span></span>
-                <span class="text-slate-500 text-xs">tap to expand ▾</span>
+        <details class="bg-slate-900/40 border border-slate-800 rounded-lg h-fit">
+            <summary class="cursor-pointer select-none px-4 py-3 text-sm font-bold text-slate-200 flex items-center justify-between gap-2">
+                <span class="truncate">${label} <span class="text-slate-500 font-normal">(${items.length})</span></span>
+                <span class="text-slate-500 text-[10px] whitespace-nowrap">tap ▾</span>
             </summary>
-            <div class="flex flex-wrap gap-2 p-4 pt-0">${links}</div>
+            <div class="flex flex-wrap gap-2 p-4 pt-0 max-h-64 overflow-y-auto">${links}</div>
         </details>
+    `;
+}
+
+// NEW: Wraps a group of accordion boxes (e.g. Channels/Categories/
+// Country/Performers) in a responsive grid — 2 boxes per row on mobile,
+// 4 on desktop — instead of one full-width row per accordion stacked
+// vertically. Works fine with fewer than 4 sections too (they just won't
+// fill the last row).
+function renderAccordionGrid(...accordionHtmlBlocks) {
+    return `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            ${accordionHtmlBlocks.join('')}
+        </div>
     `;
 }
 
@@ -1231,10 +1259,12 @@ app.get('/', async (req, res) => {
         const content = `
             ${renderSlider('Trending Keywords', topKeywords.map(kw => ({ label: kw, slug: toSlug(kw) })), k => `/keyword/${k.slug}`)}
 
-            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
-            ${renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
-            ${renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
-            ${renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`)}
+            ${renderAccordionGrid(
+                renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`),
+                renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`),
+                renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`),
+                renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`)
+            )}
 
             <div class="mb-8 mt-6">
                 <div class="flex justify-between items-center mb-4">
@@ -1282,15 +1312,18 @@ app.get('/tag/:slug', async (req, res) => {
         const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
-            ${renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`)}
-            ${renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)}
+            ${renderAccordionGrid(
+                renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`),
+                renderAccordion('Categories', CATEGORIES, c => `/tag/${c.slug}`),
+                renderAccordion('Country / Region', COUNTRIES, c => `/tag/${c.slug}`)
+            )}
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${category.label} Videos</h1>
                 <div class="flex gap-2">${renderSortLinks(`/tag/${category.slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-2">${getDescription('tag', category.slug, category.blurb)}</p>
             ${renderPreviewStrip(videos)}
+            ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
         `;
@@ -1332,6 +1365,7 @@ app.get('/channel/:slug', async (req, res) => {
             </div>
             <p class="text-sm text-slate-400 mb-2">${getDescription('channel', channel.slug, channel.blurb)}</p>
             ${renderPreviewStrip(videos)}
+            ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
         `;
@@ -1364,8 +1398,10 @@ app.get('/star/:slug', async (req, res) => {
         const hasMore = videos.length === PER_PAGE;
 
         const content = `
-            ${renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`)}
-            ${renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)}
+            ${renderAccordionGrid(
+                renderAccordion('Performers', PERFORMERS, p => `/star/${p.slug}`),
+                renderAccordion('Channels', CHANNELS, ch => `/channel/${ch.slug}`)
+            )}
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2 mt-4">
                 <h1 class="text-2xl font-bold text-red-500">${performer.label}</h1>
                 <div class="flex gap-2">${renderSortLinks(`/star/${performer.slug}`, order)}</div>
@@ -1373,6 +1409,7 @@ app.get('/star/:slug', async (req, res) => {
             <p class="text-sm text-slate-400 mb-2">${getDescription('star', performer.slug, performer.blurb)}</p>
             ${renderBioSection(performer.slug)}
             ${renderPreviewStrip(videos)}
+            ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
         `;

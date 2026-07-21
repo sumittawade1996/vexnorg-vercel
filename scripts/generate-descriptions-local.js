@@ -1,24 +1,24 @@
 /**
- * generate-descriptions-local.js
+ * generate-descriptions-local.js (v2 — combinatorial)
  *
- * Generates a short, varied description for every channel, category, and
- * performer page WITHOUT calling any external API — no Anthropic key,
- * no cost, runs instantly. It rotates through a bank of sentence
- * structures (keyed off each item's slug, so the same item always gets
- * the same result — deterministic, not random each run) so pages don't
- * all read as identical copy-paste text.
+ * Same goal as before (free, no API key, deterministic), but fixes the
+ * "too many pages share the same sentence shape" problem. Instead of
+ * picking ONE of 6 whole-sentence templates per page (which repeats
+ * every ~6 pages), this builds each sentence out of several INDEPENDENT
+ * slots — opener, verb phrase, detail clause, closer — each with its
+ * own word bank. The slots are chosen independently per page, so the
+ * number of unique combinations multiplies instead of adding.
  *
- * This is a reasonable free stand-in for true AI-written unique prose.
- * It won't be as naturally varied as per-item AI generation, but it
- * fixes the "every page has the exact same sentence" problem, which is
- * the main thing worth avoiding for SEO.
+ * With 6 openers x 6 verbs x 6 details x 6 closers = 1,296 possible
+ * shapes per page type — comfortably more than the ~180-291 pages in
+ * any one type, so structural repeats become rare instead of common.
  *
  * Usage:
  *   node scripts/generate-descriptions-local.js
  *
  * Output: data/descriptions.json, keyed "type:slug" -> description string.
- * Safe to re-run — fully regenerates the file (this one's free, so there's
- * no need to preserve partial progress like the API version does).
+ * Deterministic and safe to re-run (same slug always produces the same
+ * result, so this won't churn your file if you regenerate later).
  */
 
 const fs = require('fs');
@@ -28,57 +28,81 @@ const { CHANNELS, CATEGORIES, PERFORMERS } = require('../api/index.js');
 
 const OUT_PATH = path.join(__dirname, '..', 'data', 'descriptions.json');
 
-// Simple deterministic hash so the same slug always maps to the same
-// template index (stable across re-runs, not random).
-function hashIndex(str, mod) {
+// Deterministic hash -> stable per-slug slot selection.
+function hashPick(str, salt, arr) {
     let h = 0;
-    for (let i = 0; i < str.length; i++) {
-        h = (h * 31 + str.charCodeAt(i)) >>> 0;
-    }
-    return h % mod;
+    const s = str + '|' + salt;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return arr[h % arr.length];
 }
 
-const CHANNEL_TEMPLATES = [
-    (name) => `Browse the ${name} library here, with new uploads added as they're released and sortable by trending, top rated, or latest.`,
-    (name) => `This page collects videos published under the ${name} banner. Use the sort options above to jump straight to what's new or what's currently trending.`,
-    (name) => `Everything currently available from ${name} lives on this page, updated as fresh content comes in. Switch between latest and top-rated to filter results.`,
-    (name) => `A running collection of ${name} uploads, refreshed continuously. Sort by trending or latest to narrow down what you're looking for.`,
-    (name) => `${name} content is organized here in one place, with pagination and sorting so you can browse by popularity or recency.`,
-    (name) => `Find the current catalog of ${name} videos on this page. New releases are added over time, and you can reorder results by rating or date.`,
+const NOUN = { channel: 'channel', tag: 'category', star: 'performer' };
+
+const OPENERS = {
+    channel: [
+        (n) => `This page collects videos published under the ${n} banner`,
+        (n) => `Browse the current lineup from ${n}`,
+        (n) => `Here's what's available from ${n} right now`,
+        (n) => `A running catalog of ${n} uploads lives on this page`,
+        (n) => `Videos released under ${n} are gathered here`,
+        (n) => `${n}'s available catalog is organized on this page`,
+    ],
+    tag: [
+        (n) => `This page gathers videos tagged ${n}`,
+        (n) => `Browse everything filed under ${n}`,
+        (n) => `Here's the current ${n} listing`,
+        (n) => `A filtered view of the ${n} category lives on this page`,
+        (n) => `Videos matching ${n} are collected here`,
+        (n) => `The ${n} category is organized on this page`,
+    ],
+    star: [
+        (n) => `This page lists videos featuring ${n}`,
+        (n) => `Browse the current catalog for ${n}`,
+        (n) => `Here's what's indexed under ${n} right now`,
+        (n) => `A collected view of ${n}'s videos lives on this page`,
+        (n) => `Videos featuring ${n} are gathered here`,
+        (n) => `${n}'s available videos are organized on this page`,
+    ],
+};
+
+const DETAILS = [
+    `updated as new uploads come in`,
+    `refreshed continuously as the catalog grows`,
+    `with new matches added over time`,
+    `kept current as fresh content is indexed`,
+    `pulled directly from the live catalog`,
+    `reflecting the latest available results`,
 ];
 
-const CATEGORY_TEMPLATES = [
-    (name) => `This page gathers videos tagged ${name}, pulled from across the catalog and updated as new matches appear.`,
-    (name) => `Browse the ${name} category here — results are sorted by trending, top rated, or latest, whichever you prefer.`,
-    (name) => `A filtered view of everything tagged ${name}, refreshed continuously and searchable by page.`,
-    (name) => `Everything matching ${name} is collected on this page, with sort and pagination controls above the results.`,
-    (name) => `This is the ${name} listing page — new matches are added automatically as the catalog updates.`,
-    (name) => `Videos categorized under ${name} appear here, orderable by recency or rating using the controls above.`,
+const CLOSERS = [
+    `Use the sort links above to switch between trending, top rated, or latest.`,
+    `Sort by trending, top rated, or latest using the controls above.`,
+    `You can reorder results by recency or rating from the sort menu above.`,
+    `Pagination and sort options are available above the results.`,
+    `Switch sort order or move between pages using the controls above.`,
+    `Browse by page, or reorder using the sort options above.`,
 ];
 
-const PERFORMER_TEMPLATES = [
-    (name) => `This page lists videos featuring ${name}, sortable by trending, top rated, or latest upload.`,
-    (name) => `Browse ${name}'s available videos here, updated as new content is indexed.`,
-    (name) => `A collected view of videos featuring ${name}, with sorting and pagination above the grid.`,
-    (name) => `Find videos featuring ${name} on this page, refreshed as new matches come in from the catalog.`,
-    (name) => `Everything currently indexed under ${name} appears here — use the sort options to browse by date or rating.`,
-    (name) => `This page tracks videos featuring ${name}, searchable across multiple pages and sort orders.`,
-];
+function buildDescription(type, item) {
+    const opener = hashPick(item.slug, `${type}-opener`, OPENERS[type])(item.label);
+    const detail = hashPick(item.slug, `${type}-detail`, DETAILS);
+    const closer = hashPick(item.slug, `${type}-closer`, CLOSERS);
+    return `${opener}, ${detail}. ${closer}`;
+}
 
-function generateFor(type, items, templates) {
+function generateFor(type, items) {
     const out = {};
     for (const item of items) {
-        const idx = hashIndex(`${type}:${item.slug}`, templates.length);
-        out[`${type}:${item.slug}`] = templates[idx](item.label);
+        out[`${type}:${item.slug}`] = buildDescription(type, item);
     }
     return out;
 }
 
 function main() {
     const result = {
-        ...generateFor('channel', CHANNELS, CHANNEL_TEMPLATES),
-        ...generateFor('tag', CATEGORIES, CATEGORY_TEMPLATES),
-        ...generateFor('star', PERFORMERS, PERFORMER_TEMPLATES)
+        ...generateFor('channel', CHANNELS),
+        ...generateFor('tag', CATEGORIES),
+        ...generateFor('star', PERFORMERS)
     };
 
     fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
