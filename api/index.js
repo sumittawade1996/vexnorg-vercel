@@ -908,30 +908,46 @@ async function cachedGet(key, url) {
 // 3. HTML SSR TEMPLATE
 // -------------------------------------------------------------
 
-// AD PLACEMENTS — DISABLED as of this update. The previous ad network
-// domain (supportiveinvoicevarnish.com) is now returning 500 errors on
-// every script it serves (confirmed via PageSpeed Insights console
-// errors), and was ALSO the domain flagged in the original project
-// notes as a Safe Browsing / deceptive-ad risk that was supposed to be
-// scaled back. It was neither scaled back nor working, and was
-// responsible for ~3.2 seconds of render-blocking time on its own.
-// Left as empty placeholders below so the page layout doesn't break —
-// drop in a new, working ad network's embed codes here when ready.
+// AD PLACEMENTS — now using real JuicyAds embed codes (jads.co domain,
+// verified separate from the previous broken/flagged supportiveinvoice-
+// varnish.com domain). The jads.js loader script is included ONCE,
+// site-wide (see JUICYADS_LOADER_SCRIPT below, injected in <head>),
+// rather than repeating a duplicate <script src="jads.js"> tag in every
+// individual ad slot as originally provided — same effect, one fewer
+// redundant network request per page.
+const JUICYADS_LOADER_SCRIPT = `<script type="text/javascript" data-cfasync="false" async src="https://poweredby.jads.co/js/jads.js"></script>`;
+
+// No JuicyAds zone was provided specifically for the social bar slot —
+// left empty. Add one here if you create a zone for it later.
 const SOCIAL_BAR_SCRIPT = '';
 
+// Video grid placement — appears once per grid page (after the 5th
+// video), confirmed safe since INLINE_BANNER_HTML (below) is not
+// currently used anywhere, so this zone ID never appears twice on the
+// same page.
 const NATIVE_BANNER_HTML = `
     <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
         <span class="text-[9px] font-mono text-slate-400 uppercase mb-1">Sponsored</span>
+        <ins id="1122724" data-width="108" data-height="140"></ins>
+        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122724});</script>
     </div>
 `;
 
-// 320x50 banner slot — placed once near the top of every page, right
-// under the header. Currently empty (see note above); replace with a
-// new ad network's embed code.
-const TOP_BANNER_HTML = '';
+// Header banner — 300x50.
+const TOP_BANNER_HTML = `
+    <div class="w-full flex justify-center py-2 bg-slate-950">
+        <ins id="1122721" data-width="300" data-height="50"></ins>
+        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122721});</script>
+    </div>
+`;
 
-// Bottom banner — same slot pattern as the top banner.
-const BOTTOM_BANNER_HTML = '';
+// Footer banner — 300x100.
+const BOTTOM_BANNER_HTML = `
+    <div class="w-full flex justify-center py-2 bg-slate-950">
+        <ins id="1122720" data-width="300" data-height="100"></ins>
+        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122720});</script>
+    </div>
+`;
 
 function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd, robotsMeta }) {
     return `<!DOCTYPE html>
@@ -973,6 +989,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
     ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ''}
+    ${JUICYADS_LOADER_SCRIPT}
     ${SOCIAL_BAR_SCRIPT}
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
@@ -1601,6 +1618,8 @@ app.get('/video/:id/:slug?', async (req, res) => {
                 ${NATIVE_BANNER_HTML}
                 ${relatedHtml}
             </div>
+            <script type="text/javascript">juicy_adzone = '1122725';</script>
+            <script type="text/javascript" src="https://poweredby.jads.co/js/jfc.js" charset="utf-8"></script>
         `;
 
         res.send(renderHTMLPage({
