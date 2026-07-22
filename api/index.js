@@ -851,7 +851,7 @@ function renderSortLinks(basePath, currentOrder) {
     return SORT_OPTIONS.map(opt => {
         const active = opt.value === currentOrder;
         const cls = active
-            ? 'px-3 py-1 rounded bg-red-600 text-white text-xs font-bold'
+            ? 'px-3 py-1 rounded bg-red-700 text-white text-xs font-bold'
             : 'px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400';
         return `<a href="${basePath}?order=${opt.value}" class="${cls}">${opt.label}</a>`;
     }).join(' ');
@@ -875,10 +875,10 @@ function renderPagination(basePath, order, page, hasMore) {
     const qs = (p) => `?order=${order}&page=${p}`;
     const prev = page > 1
         ? `<a href="${basePath}${qs(page - 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">← Prev</a>`
-        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-500 text-xs">← Prev</span>`;
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-400 text-xs">← Prev</span>`;
     const next = hasMore
         ? `<a href="${basePath}${qs(page + 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">Next →</a>`
-        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-500 text-xs">Next →</span>`;
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-400 text-xs">Next →</span>`;
     return `<div class="flex items-center justify-between mt-6"><span class="text-xs text-slate-400 font-mono">Page ${page}</span><div class="flex gap-2">${prev}${next}</div></div>`;
 }
 
@@ -921,7 +921,7 @@ const SOCIAL_BAR_SCRIPT = '';
 
 const NATIVE_BANNER_HTML = `
     <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-500 uppercase mb-1">Sponsored</span>
+        <span class="text-[9px] font-mono text-slate-400 uppercase mb-1">Sponsored</span>
     </div>
 `;
 
@@ -966,7 +966,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <meta name="twitter:title" content="${title}">
     <meta name="twitter:description" content="${description}">
 
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/styles.css">
     ${HOVER_PREVIEW_SCRIPT}
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -983,7 +983,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
             <div class="flex gap-2 items-center w-full sm:w-auto">
                 <form action="/search" method="GET" class="flex gap-2 flex-grow sm:flex-grow-0">
                     <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
-                    <button type="submit" class="bg-red-600 px-4 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap">Search</button>
+                    <button type="submit" class="bg-red-700 px-4 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap">Search</button>
                 </form>
                 <a href="/favorites" class="bg-slate-800 px-3 py-2 sm:py-1 rounded text-sm font-bold whitespace-nowrap border border-slate-700 hover:border-red-500">❤ <span id="favNavCount">0</span></a>
             </div>
@@ -1093,7 +1093,7 @@ function renderAccordionGrid(...accordionHtmlBlocks) {
 // network's embed code when ready.
 const INLINE_BANNER_HTML = `
     <div class="col-span-1 min-h-[80px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-500 uppercase mb-1">Sponsored</span>
+        <span class="text-[9px] font-mono text-slate-400 uppercase mb-1">Sponsored</span>
     </div>
 `;
 
@@ -1620,6 +1620,32 @@ app.get('/video/:id/:slug?', async (req, res) => {
 // -------------------------------------------------------------
 // 5. SITEMAPS — now split into: index -> categories, performers, videos
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// Static CSS — replaces the Tailwind CDN script. Previously the site
+// loaded https://cdn.tailwindcss.com, a ~124 KiB JavaScript file that
+// has to download AND execute before the page can render (confirmed
+// as the #1 render-blocking resource in PageSpeed Insights). This route
+// instead serves a pre-compiled, purged CSS file (~11 KiB) containing
+// only the Tailwind classes actually used across the site — a static
+// stylesheet the browser can apply immediately, no JS execution needed.
+//
+// IMPORTANT: if you add NEW Tailwind classes to this file that aren't
+// already used elsewhere, they won't appear in styles.css until you
+// rebuild it. Run: node scripts/build-css.js
+// (See that script for full instructions.)
+let COMPILED_CSS = '';
+try {
+    COMPILED_CSS = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+} catch (err) {
+    COMPILED_CSS = ''; // fine if not built yet — page just renders unstyled until it is
+}
+
+app.get('/styles.css', (req, res) => {
+    res.header('Content-Type', 'text/css');
+    res.header('Cache-Control', 'public, max-age=86400'); // 1 day — rebuild + redeploy to bust this
+    res.send(COMPILED_CSS);
+});
+
 app.get('/sitemap.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
     const now = new Date().toISOString();
