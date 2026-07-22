@@ -875,11 +875,11 @@ function renderPagination(basePath, order, page, hasMore) {
     const qs = (p) => `?order=${order}&page=${p}`;
     const prev = page > 1
         ? `<a href="${basePath}${qs(page - 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">← Prev</a>`
-        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-600 text-xs">← Prev</span>`;
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-500 text-xs">← Prev</span>`;
     const next = hasMore
         ? `<a href="${basePath}${qs(page + 1)}" class="px-3 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs hover:text-red-400">Next →</a>`
-        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-600 text-xs">Next →</span>`;
-    return `<div class="flex items-center justify-between mt-6"><span class="text-xs text-slate-500 font-mono">Page ${page}</span><div class="flex gap-2">${prev}${next}</div></div>`;
+        : `<span class="px-3 py-1 rounded bg-slate-900/40 border border-slate-900 text-slate-500 text-xs">Next →</span>`;
+    return `<div class="flex items-center justify-between mt-6"><span class="text-xs text-slate-400 font-mono">Page ${page}</span><div class="flex gap-2">${prev}${next}</div></div>`;
 }
 
 // -------------------------------------------------------------
@@ -908,43 +908,30 @@ async function cachedGet(key, url) {
 // 3. HTML SSR TEMPLATE
 // -------------------------------------------------------------
 
-// AD PLACEMENTS — added per your request. All four point to the same ad
-// network domain; see my note in chat about the smartlink specifically.
-const SOCIAL_BAR_SCRIPT = `<script src="https://supportiveinvoicevarnish.com/f0/10/13/f010135b24ae94e9bf9be88f3d51e2ed.js"></script>`;
+// AD PLACEMENTS — DISABLED as of this update. The previous ad network
+// domain (supportiveinvoicevarnish.com) is now returning 500 errors on
+// every script it serves (confirmed via PageSpeed Insights console
+// errors), and was ALSO the domain flagged in the original project
+// notes as a Safe Browsing / deceptive-ad risk that was supposed to be
+// scaled back. It was neither scaled back nor working, and was
+// responsible for ~3.2 seconds of render-blocking time on its own.
+// Left as empty placeholders below so the page layout doesn't break —
+// drop in a new, working ad network's embed codes here when ready.
+const SOCIAL_BAR_SCRIPT = '';
 
 const NATIVE_BANNER_HTML = `
     <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-600 uppercase mb-1">Sponsored</span>
-        <div id="container-5de161d2a3fd4a9ee2823cd1195c61f7"></div>
-        <script async="async" data-cfasync="false" src="https://supportiveinvoicevarnish.com/5de161d2a3fd4a9ee2823cd1195c61f7/invoke.js"></script>
+        <span class="text-[9px] font-mono text-slate-500 uppercase mb-1">Sponsored</span>
     </div>
 `;
 
-// 320x50 banner — placed once near the top of every page, right under the
-// header, so it gets seen without needing an ad slot per 4 videos.
-const TOP_BANNER_HTML = `
-    <div class="w-full flex justify-center py-2 bg-slate-950">
-        <script>
-            atOptions = {
-                'key' : '2260e6c38ea6fb994bedaf818bff091f',
-                'format' : 'iframe',
-                'height' : 50,
-                'width' : 320,
-                'params' : {}
-            };
-        </script>
-        <script src="https://supportiveinvoicevarnish.com/2260e6c38ea6fb994bedaf818bff091f/invoke.js"></script>
-    </div>
-`;
+// 320x50 banner slot — placed once near the top of every page, right
+// under the header. Currently empty (see note above); replace with a
+// new ad network's embed code.
+const TOP_BANNER_HTML = '';
 
-// CHANGE: Bottom banner, same ad unit repeated. Unlike the native banner
-// below, this atOptions/invoke.js pattern doesn't rely on a fixed
-// container ID — each script block sets the global atOptions and loads
-// invoke.js immediately after, so it's safe to repeat multiple times on
-// one page (top + bottom), unlike the native banner.
-const BOTTOM_BANNER_HTML = TOP_BANNER_HTML;
-
-const SMARTLINK_URL = 'https://supportiveinvoicevarnish.com/twknxez5h?key=71a6af98250d13d68564c79bdc53854e';
+// Bottom banner — same slot pattern as the top banner.
+const BOTTOM_BANNER_HTML = '';
 
 function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd, robotsMeta }) {
     return `<!DOCTYPE html>
@@ -960,6 +947,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
          account/site won't do anything useful here. -->
     <meta name="google-site-verification" content="REPLACE_WITH_YOUR_GOOGLE_CODE">
     <meta name="msvalidate.01" content="REPLACE_WITH_YOUR_BING_CODE">
+    <meta name="juicyads-site-verification" content="affadfd335bfb7c9a93b58524dc9904e">
 
     <title>${title}</title>
     <meta name="description" content="${description}">
@@ -992,11 +980,6 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
         <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
             <a href="/" class="text-xl sm:text-2xl font-black text-red-500 text-center sm:text-left">STREAM<span class="text-white">HUB</span>ELITE</a>
 
-            <a href="${SMARTLINK_URL}" target="_blank" rel="noopener noreferrer" class="bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 font-black text-[11px] sm:text-xs px-4 py-1.5 rounded-full uppercase tracking-wider shadow-lg flex items-center gap-1.5 justify-center">
-                <span>🔥 Get Free Brazzers Subscription</span>
-                <span class="bg-slate-950 text-amber-400 text-[9px] px-1.5 py-0.5 rounded-full font-bold">CLAIM NOW</span>
-            </a>
-
             <div class="flex gap-2 items-center w-full sm:w-auto">
                 <form action="/search" method="GET" class="flex gap-2 flex-grow sm:flex-grow-0">
                     <input type="text" name="q" placeholder="Search keywords..." class="bg-slate-950 text-white px-3 py-2 sm:py-1 rounded border border-slate-800 text-sm flex-grow sm:flex-grow-0 sm:w-56">
@@ -1015,7 +998,7 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 
     ${BOTTOM_BANNER_HTML}
 
-    <footer class="bg-slate-900 border-t border-slate-800 p-6 text-center text-xs text-slate-500">
+    <footer class="bg-slate-900 border-t border-slate-800 p-6 text-center text-xs text-slate-400">
         <p>&copy; ${new Date().getFullYear()} StreamHub Elite. All Rights Reserved. 18+ Adult Content.</p>
     </footer>
 
@@ -1064,7 +1047,7 @@ function renderSlider(label, items, hrefBuilder) {
     `).join('');
     return `
         <div class="mb-4">
-            <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">${label}</span>
+            <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">${label}</span>
             <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${links}</div>
         </div>
     `;
@@ -1083,8 +1066,8 @@ function renderAccordion(label, items, hrefBuilder) {
     return `
         <details class="bg-slate-900/40 border border-slate-800 rounded-lg h-fit">
             <summary class="cursor-pointer select-none px-4 py-3 text-sm font-bold text-slate-200 flex items-center justify-between gap-2">
-                <span class="truncate">${label} <span class="text-slate-500 font-normal">(${items.length})</span></span>
-                <span class="text-slate-500 text-[10px] whitespace-nowrap">tap ▾</span>
+                <span class="truncate">${label} <span class="text-slate-400 font-normal">(${items.length})</span></span>
+                <span class="text-slate-400 text-[10px] whitespace-nowrap">tap ▾</span>
             </summary>
             <div class="flex flex-wrap gap-2 p-4 pt-0 max-h-64 overflow-y-auto">${links}</div>
         </details>
@@ -1105,23 +1088,12 @@ function renderAccordionGrid(...accordionHtmlBlocks) {
 }
 
 // NEW: Small repeatable banner ad for grid buckets beyond the first. Uses
-// the SAME 320x50 ad unit as the top/bottom banners — safe to repeat
-// because it's script-driven (atOptions + invoke.js), not tied to a fixed
-// container ID like the native banner is. This is how "an ad after every
-// bucket" is achieved without recreating the blank-native-ad bug.
+// Same slot pattern as TOP_BANNER_HTML/BOTTOM_BANNER_HTML — currently
+// disabled (see note near those constants). Replace with a new ad
+// network's embed code when ready.
 const INLINE_BANNER_HTML = `
     <div class="col-span-1 min-h-[80px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-600 uppercase mb-1">Sponsored</span>
-        <script>
-            atOptions = {
-                'key' : '2260e6c38ea6fb994bedaf818bff091f',
-                'format' : 'iframe',
-                'height' : 50,
-                'width' : 320,
-                'params' : {}
-            };
-        </script>
-        <script src="https://supportiveinvoicevarnish.com/2260e6c38ea6fb994bedaf818bff091f/invoke.js"></script>
+        <span class="text-[9px] font-mono text-slate-500 uppercase mb-1">Sponsored</span>
     </div>
 `;
 
@@ -1149,7 +1121,7 @@ function renderPreviewStrip(videos, count = 6) {
         const href = `/video/${v.id}/${toSlug(v.title)}`;
         return `
             <a href="${href}" class="flex-shrink-0 w-28 sm:w-32">
-                <img src="${v.default_thumb.src}" alt="${v.title}" class="w-28 sm:w-32 h-20 object-cover rounded-md border border-slate-800" loading="lazy">
+                <img src="${v.default_thumb.src}" alt="${v.title}" width="128" height="80" decoding="async" class="w-28 sm:w-32 h-20 object-cover rounded-md border border-slate-800" loading="lazy">
             </a>`;
     }).join('');
     return `
@@ -1177,7 +1149,7 @@ function renderVideoGrid(videos, adType = 'none') {
                 <button data-fav-id="${v.id}" onclick="toggleFavorite('${v.id}', '${safeTitle}', '${v.default_thumb.src}', '${href}')" class="absolute top-2 right-2 z-10 w-7 h-7 bg-slate-950/80 rounded-lg flex items-center justify-center text-sm border border-slate-800">♡</button>
                 <a href="${href}">
                     <div class="relative w-full h-48 preview-thumb-wrap">
-                        <img src="${v.default_thumb.src}" alt="${v.title}" class="w-full h-48 object-cover" loading="lazy">
+                        <img src="${v.default_thumb.src}" alt="${v.title}" width="320" height="192" decoding="async" class="w-full h-48 object-cover" loading="lazy">
                     </div>
                     <div class="p-3">
                         <h2 class="text-sm font-bold truncate text-slate-200">${v.title}</h2>
@@ -1495,7 +1467,7 @@ app.get('/favorites', (req, res) => {
                     div.innerHTML = \`
                         <button data-fav-id="\${f.id}" onclick="toggleFavorite('\${f.id}', '', '', '')" class="absolute top-2 right-2 z-10 w-7 h-7 bg-slate-950/80 rounded-lg flex items-center justify-center text-sm border border-slate-800">❤</button>
                         <a href="\${f.href}">
-                            <img src="\${f.thumb}" alt="\${f.title}" class="w-full h-48 object-cover" loading="lazy">
+                            <img src="\${f.thumb}" alt="\${f.title}" width="320" height="192" decoding="async" class="w-full h-48 object-cover" loading="lazy">
                             <div class="p-3"><h2 class="text-sm font-bold truncate text-slate-200">\${f.title}</h2></div>
                         </a>\`;
                     grid.appendChild(div);
