@@ -879,7 +879,7 @@ const FLOAT_AD_PLAYER_SCRIPT = `
 <!-- End JuicyAds Float Ad -->
 `;
 
-// 4. Video Grid Bucket Ad (Injected every 5th video)
+// 4. Video Grid Bucket Ad (Injected after every 5th video)
 const EVERY_5TH_VIDEO_AD = `
 <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
     <script async="async" data-cfasync="false" src="https://supportiveinvoicevarnish.com/5de161d2a3fd4a9ee2823cd1195c61f7/invoke.js"></script>
@@ -1072,7 +1072,7 @@ function renderVideoGrid(videos, adType = 'bucket') {
             </div>
         `;
         
-        // Insert ad after every 5th video
+        // Insert ad unit after every 5th video item in grid buckets
         if (adType !== 'none' && (index + 1) % 5 === 0) {
             html += EVERY_5TH_VIDEO_AD;
         }
@@ -1435,11 +1435,8 @@ app.get('/video/:id/:slug?', async (req, res) => {
             <div class="mt-8">
                 <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wide">Related Videos</h2>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                    ${renderVideoGrid(relatedVideos, 'none')}
+                    ${renderVideoGrid(relatedVideos, 'bucket')}
                 </div>
-            </div>
-            <div class="mt-6">
-                ${EVERY_5TH_VIDEO_AD}
             </div>
         ` : '';
 
@@ -1461,7 +1458,15 @@ app.get('/video/:id/:slug?', async (req, res) => {
                     <p class="text-xs text-slate-400 font-mono">Duration: ${video.length_sec ? Math.round(video.length_sec/60) : video.length_min} mins | Rating: ★ ${video.rate || '4.8'}</p>
                 </div>
                 ${keywordTagsHtml}
+                
+                <!-- Float Ad Script for Video Player Page -->
                 ${FLOAT_AD_PLAYER_SCRIPT}
+
+                <!-- Ad Above Related Videos / Below Video Player Grid -->
+                <div class="my-6">
+                    ${EVERY_5TH_VIDEO_AD}
+                </div>
+
                 ${relatedHtml}
             </div>
         `;
