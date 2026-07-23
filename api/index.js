@@ -8,12 +8,7 @@ const app = express();
 const DOMAIN = 'https://vexn.org';
 
 // -------------------------------------------------------------
-// AI-generated unique SEO descriptions, keyed by "type:slug"
-// (e.g. "channel:brazzers", "tag:milf", "star:some-performer").
-// Loaded once at startup. If a key is missing (not yet generated,
-// or the file doesn't exist), falls back to the item's own .blurb
-// so pages never break — this is a progressive enhancement, not
-// a replacement.
+// AI-generated unique SEO descriptions
 // -------------------------------------------------------------
 let PAGE_DESCRIPTIONS = {};
 let PAGE_DESCRIPTIONS_MANUAL = {};
@@ -21,29 +16,22 @@ try {
     const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'descriptions.json'), 'utf8');
     PAGE_DESCRIPTIONS = JSON.parse(raw);
 } catch (err) {
-    PAGE_DESCRIPTIONS = {}; // file not generated yet — fine, blurb fallback covers it
+    PAGE_DESCRIPTIONS = {};
 }
 try {
     const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'descriptions-manual.json'), 'utf8');
     PAGE_DESCRIPTIONS_MANUAL = JSON.parse(raw);
 } catch (err) {
-    PAGE_DESCRIPTIONS_MANUAL = {}; // fine if it doesn't exist yet
+    PAGE_DESCRIPTIONS_MANUAL = {};
 }
 
 function getDescription(type, slug, fallback) {
     const key = `${type}:${slug}`;
-    // Priority: hand-written override > free generated text > old blurb
     return PAGE_DESCRIPTIONS_MANUAL[key] || PAGE_DESCRIPTIONS[key] || fallback;
 }
 
 // -------------------------------------------------------------
-// Performer "About" bio paragraphs — separate file from descriptions.json
-// on purpose, since these are a different content type (longer, personal-
-// adjacent copy vs. the short catalog-page description). Deliberately
-// generic and non-personal: no invented age, real name, nationality, or
-// biographical claims about a real individual — see project notes.
-// Missing entries simply render nothing (no section shown), never a
-// fabricated fallback.
+// Performer "About" bio paragraphs
 // -------------------------------------------------------------
 let PERFORMER_BIOS = {};
 let PERFORMER_BIOS_MANUAL = {};
@@ -57,7 +45,7 @@ try {
     const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'performer-bios-manual.json'), 'utf8');
     PERFORMER_BIOS_MANUAL = JSON.parse(raw);
 } catch (err) {
-    PERFORMER_BIOS_MANUAL = {}; // fine if it doesn't exist yet
+    PERFORMER_BIOS_MANUAL = {};
 }
 
 function renderBioSection(slug) {
@@ -72,14 +60,8 @@ function renderBioSection(slug) {
 }
 
 // -------------------------------------------------------------
-// 1. REAL DATA LISTS — parsed and deduplicated from an actual industry
-// taxonomy list you provided (performers, channels/studios, categories).
-// Every entry here maps to a real search query against the API, backed by
-// real distinct video results — this is large-scale but not manufactured.
+// 1. REAL DATA LISTS
 // -------------------------------------------------------------
-
-// CHANNELS = studio/network brands (Brazzers, Blacked, MYLF, etc).
-// Brazzers is intentionally first — used to pin it on the homepage.
 const CHANNELS = [
     { slug: 'brazzers', label: 'Brazzers', blurb: 'Videos from the Brazzers studio/channel.' },
     { slug: 'blacked', label: 'Blacked', blurb: 'Videos from the Blacked studio/channel.' },
@@ -263,11 +245,6 @@ const CHANNELS = [
     { slug: 'amaraw', label: 'Amaraw', blurb: 'Videos from the Amaraw studio/channel.' },
 ];
 
-// CATEGORIES = generic content-type tags (Anal, MILF, Cosplay, etc).
-// Entries flagged `country: true` are the real nationality/region terms
-// that were already present in your list (American, Japanese, Indian,
-// Desi, etc.) — grouped into a "Country/Region" filter using the SAME
-// real pages, not fabricated per-video country data. See note below.
 const CATEGORIES = [
     { slug: '18-years', label: '18 Years', blurb: 'Browse 18 Years videos and clips, updated regularly.' },
     { slug: '3d', label: '3D', blurb: 'Browse 3D videos and clips, updated regularly.' },
@@ -562,15 +539,6 @@ const CATEGORIES = [
     { slug: 'smooch', label: 'smooch', blurb: 'Browse smooch videos and clips, updated regularly.' },
 ];
 
-// -------------------------------------------------------------
-// NOTE ON "COUNTRY" PAGES:
-// The eporner API has no structured per-video country field. Rather than
-// inventing one, COUNTRIES below is just a filtered view of CATEGORIES —
-// the nationality/region terms your own list already included (American,
-// Asian, Japanese, Indian, Desi, etc.). These link to the exact same
-// /tag/:slug pages as the category list — no duplicate pages, no invented
-// data, just a second way to browse the same real content.
-// -------------------------------------------------------------
 const COUNTRIES = CATEGORIES.filter(c => c.country === true);
 
 const PERFORMERS = [
@@ -804,14 +772,6 @@ function fromSlug(slug) {
     return slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-// CHANGE: Builds a "trending keywords" list from REAL data — it counts how
-// often each keyword appears across a batch of currently trending videos'
-// own `keywords` field (returned by the API), rather than a hand-typed
-// list. This grows/shrinks naturally as real trending content changes,
-// instead of being a fixed set of manufactured search-term pages.
-// Widened to accept multiple video arrays (trending + latest + brazzers)
-// so the pool draws from more real, current data before ranking by
-// frequency — more variety without inventing anything.
 function extractTopKeywords(videoArrays, limit = 60) {
     const counts = new Map();
     const allVideos = [].concat(...videoArrays);
@@ -820,12 +780,6 @@ function extractTopKeywords(videoArrays, limit = 60) {
         v.keywords.split(',').forEach(raw => {
             const kw = raw.trim().toLowerCase();
             const wordCount = kw.split(/\s+/).length;
-            // BUGFIX: eporner's API sometimes returns a full video title (with
-            // a random ID suffix) inside the `keywords` field instead of a
-            // real short tag. A real keyword tag is 1-3 words; anything
-            // longer is almost always a leaked title, not a keyword — skip
-            // it so it never becomes a URL like
-            // /keyword/gangbang-creampie-inked-blonde-beauty-gets-swarmed...
             if (kw.length < 2 || kw.length > 25 || wordCount > 3) return;
             counts.set(kw, (counts.get(kw) || 0) + 1);
         });
@@ -836,17 +790,12 @@ function extractTopKeywords(videoArrays, limit = 60) {
         .map(([kw]) => kw);
 }
 
-// NEW: Real sort options — these map directly to the eporner API's own
-// `order` values, so "sorting" is genuine, not decorative.
 const SORT_OPTIONS = [
     { value: 'top-weekly', label: 'Trending' },
     { value: 'top-rated', label: 'Top Rated' },
     { value: 'latest', label: 'Latest' },
 ];
 
-// Renders crawlable <a> sort links (not JS-only) so search engines can
-// follow them, and validates the incoming order value against a safe list
-// before it's ever passed to the upstream API.
 function renderSortLinks(basePath, currentOrder) {
     return SORT_OPTIONS.map(opt => {
         const active = opt.value === currentOrder;
@@ -868,9 +817,6 @@ function safePage(page) {
     return Number.isInteger(n) && n > 0 ? n : 1;
 }
 
-// Renders Prev/Next as real crawlable links. Since the eporner API doesn't
-// reliably return a total-page count, "Next" just checks whether this page
-// came back full (a full page means there's likely more).
 function renderPagination(basePath, order, page, hasMore) {
     const qs = (p) => `?order=${order}&page=${p}`;
     const prev = page > 1
@@ -886,7 +832,7 @@ function renderPagination(basePath, order, page, hasMore) {
 // 2. SIMPLE IN-MEMORY CACHE
 // -------------------------------------------------------------
 const cache = new Map();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 async function cachedGet(key, url) {
     const entry = cache.get(key);
@@ -899,54 +845,57 @@ async function cachedGet(key, url) {
         cache.set(key, { data: res.data, time: now });
         return res.data;
     } catch (err) {
-        if (entry) return entry.data; // serve stale on failure rather than 500
+        if (entry) return entry.data;
         throw err;
     }
 }
 
 // -------------------------------------------------------------
-// 3. HTML SSR TEMPLATE
+// 3. AD PLACEMENTS & HTML SSR TEMPLATE
 // -------------------------------------------------------------
 
-// AD PLACEMENTS — now using real JuicyAds embed codes (jads.co domain,
-// verified separate from the previous broken/flagged supportiveinvoice-
-// varnish.com domain). The jads.js loader script is included ONCE,
-// site-wide (see JUICYADS_LOADER_SCRIPT below, injected in <head>),
-// rather than repeating a duplicate <script src="jads.js"> tag in every
-// individual ad slot as originally provided — same effect, one fewer
-// redundant network request per page.
-const JUICYADS_LOADER_SCRIPT = `<script type="text/javascript" data-cfasync="false" async src="https://poweredby.jads.co/js/jads.js"></script>`;
+// 1. Social Bar Site Script
+const SOCIAL_BAR_SCRIPT = `<script src="https://supportiveinvoicevarnish.com/f0/10/13/f010135b24ae94e9bf9be88f3d51e2ed.js"></script>`;
 
-// No JuicyAds zone was provided specifically for the social bar slot —
-// left empty. Add one here if you create a zone for it later.
-const SOCIAL_BAR_SCRIPT = '';
-
-// Video grid placement — appears once per grid page (after the 5th
-// video), confirmed safe since INLINE_BANNER_HTML (below) is not
-// currently used anywhere, so this zone ID never appears twice on the
-// same page.
-const NATIVE_BANNER_HTML = `
-    <div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-400 uppercase mb-1">Sponsored</span>
-        <ins id="1122724" data-width="108" data-height="140"></ins>
-        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122724});</script>
-    </div>
+// 2. Footer Banner Script
+const FOOTER_AD_SCRIPT = `
+<script>
+atOptions = {
+'key' : 'b881d4591dd8ea255cbc4e30c4506777',
+'format' : 'iframe',
+'height' : 250,
+'width' : 300,
+'params' : {}
+};
+</script>
+<script src="https://supportiveinvoicevarnish.com/b881d4591dd8ea255cbc4e30c4506777/invoke.js"></script>
 `;
 
-// Header banner — 300x50.
-const TOP_BANNER_HTML = `
-    <div class="w-full flex justify-center py-2 bg-slate-950">
-        <ins id="1122721" data-width="300" data-height="50"></ins>
-        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122721});</script>
-    </div>
+// 3. Float Ad Player (JuicyAds)
+const FLOAT_AD_PLAYER_SCRIPT = `
+<!-- Start JuicyAds Float Ad -->
+<script type="text/javascript">juicy_adzone = '1122725';</script>
+<script type="text/javascript" src="https://poweredby.jads.co/js/jfc.js" charset="utf-8"></script>
+<!-- End JuicyAds Float Ad -->
 `;
 
-// Footer banner — 300x100.
-const BOTTOM_BANNER_HTML = `
-    <div class="w-full flex justify-center py-2 bg-slate-950">
-        <ins id="1122720" data-width="300" data-height="100"></ins>
-        <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122720});</script>
-    </div>
+// 4. Video Grid Bucket Ad (Injected every 5th video)
+const EVERY_5TH_VIDEO_AD = `
+<div class="col-span-1 min-h-[250px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
+    <script async="async" data-cfasync="false" src="https://supportiveinvoicevarnish.com/5de161d2a3fd4a9ee2823cd1195c61f7/invoke.js"></script>
+    <div id="container-5de161d2a3fd4a9ee2823cd1195c61f7"></div>
+</div>
+`;
+
+// 5. Page Header Video Ad
+const HEADER_VIDEO_AD = `
+<!-- JuicyAds v3.0 -->
+<div class="w-full flex justify-center py-2 bg-slate-950">
+    <script type="text/javascript" data-cfasync="false" async src="https://poweredby.jads.co/js/jads.js"></script>
+    <ins id="1122723" data-width="300" data-height="100"></ins>
+    <script type="text/javascript" data-cfasync="false" async>(adsbyjuicy = window.adsbyjuicy || []).push({'adzone':1122723});</script>
+</div>
+<!--JuicyAds END-->
 `;
 
 function renderHTMLPage({ title, description, keywords, canonicalPath, contentHtml, ogImage, jsonLd, robotsMeta }) {
@@ -956,11 +905,6 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <!-- SEARCH ENGINE WEBMASTER VERIFICATION SECTIONS -->
-    <!-- Replace the content="" values below with the real codes Google Search
-         Console / Bing Webmaster Tools give YOU after you add vexn.org as a
-         property in your own account. A code generated for someone else's
-         account/site won't do anything useful here. -->
     <meta name="google-site-verification" content="REPLACE_WITH_YOUR_GOOGLE_CODE">
     <meta name="msvalidate.01" content="REPLACE_WITH_YOUR_BING_CODE">
     <meta name="juicyads-site-verification" content="affadfd335bfb7c9a93b58524dc9904e">
@@ -989,7 +933,6 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
     ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ''}
-    ${JUICYADS_LOADER_SCRIPT}
     ${SOCIAL_BAR_SCRIPT}
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
@@ -1007,21 +950,21 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
         </div>
     </header>
 
-    ${TOP_BANNER_HTML}
+    ${HEADER_VIDEO_AD}
 
     <main class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8 flex-grow w-full">
         ${contentHtml}
     </main>
 
-    ${BOTTOM_BANNER_HTML}
+    <div class="w-full flex justify-center py-4 bg-slate-950 border-t border-slate-800">
+        ${FOOTER_AD_SCRIPT}
+    </div>
 
     <footer class="bg-slate-900 border-t border-slate-800 p-6 text-center text-xs text-slate-400">
         <p>&copy; ${new Date().getFullYear()} StreamHub Elite. All Rights Reserved. 18+ Adult Content.</p>
     </footer>
 
     <script>
-        // CHANGE: Favorites stored ONLY in the visitor's own browser
-        // (localStorage) — never sent to the server, no account needed.
         function getFavorites() {
             try { return JSON.parse(localStorage.getItem('streamhub_favs')) || []; }
             catch (e) { return []; }
@@ -1054,10 +997,6 @@ function renderHTMLPage({ title, description, keywords, canonicalPath, contentHt
 </html>`;
 }
 
-// CHANGE: Renders category/performer/keyword links as a horizontal slider.
-// Kept ONLY for Trending Keywords now — Channels/Categories/Performers
-// moved to renderAccordion() below (per your request, only keywords stay
-// pinned at the top).
 function renderSlider(label, items, hrefBuilder) {
     const links = items.map(item => `
         <a href="${hrefBuilder(item)}" class="shrink-0 px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
@@ -1070,12 +1009,6 @@ function renderSlider(label, items, hrefBuilder) {
     `;
 }
 
-// NEW: Collapsible "slide down" section using native <details>/<summary> —
-// no JS needed, works reliably on mobile, and browsers handle the
-// open/close animation and accessibility for free. Tapping the heading
-// (Channels / Categories / Performers) expands a wrapped grid of every
-// item instead of always showing a long scroll — much better for phones,
-// since collapsed state means the page starts short.
 function renderAccordion(label, items, hrefBuilder) {
     const links = items.map(item => `
         <a href="${hrefBuilder(item)}" class="px-3 py-1.5 bg-slate-900 border border-slate-800 text-xs rounded-full text-slate-300 hover:text-red-400 hover:border-red-500/40 whitespace-nowrap">${item.label || item}</a>
@@ -1091,11 +1024,6 @@ function renderAccordion(label, items, hrefBuilder) {
     `;
 }
 
-// NEW: Wraps a group of accordion boxes (e.g. Channels/Categories/
-// Country/Performers) in a responsive grid — 2 boxes per row on mobile,
-// 4 on desktop — instead of one full-width row per accordion stacked
-// vertically. Works fine with fewer than 4 sections too (they just won't
-// fill the last row).
 function renderAccordionGrid(...accordionHtmlBlocks) {
     return `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -1104,33 +1032,6 @@ function renderAccordionGrid(...accordionHtmlBlocks) {
     `;
 }
 
-// NEW: Small repeatable banner ad for grid buckets beyond the first. Uses
-// Same slot pattern as TOP_BANNER_HTML/BOTTOM_BANNER_HTML — currently
-// disabled (see note near those constants). Replace with a new ad
-// network's embed code when ready.
-const INLINE_BANNER_HTML = `
-    <div class="col-span-1 min-h-[80px] flex flex-col items-center justify-center bg-slate-900/40 rounded-lg border border-slate-800 p-2">
-        <span class="text-[9px] font-mono text-slate-400 uppercase mb-1">Sponsored</span>
-    </div>
-`;
-
-// BUGFIX: The native banner div uses a FIXED container ID
-// (container-5de161d2a3fd4a9ee2823cd1195c61f7), and HTML IDs must be
-// unique per page. The ad network's script locates its container by that
-// ID — only the FIRST occurrence on the page is ever recognized; every
-// repeat after that renders an empty div forever. Fix: it can appear AT
-// MOST once per page (controlled by `adType: 'native'`, only take effect
-// once). Additional buckets on the same page use `adType: 'banner'`
-// instead — the repeatable 320x50 unit — placed after every 4-5 videos as
-// requested.
-// NEW: A compact photo/thumbnail preview strip for channel, performer, and
-// category pages. Uses the SAME already-fetched `videos` array the page's
-// full grid uses below — no extra API call, and critically, no scraped
-// third-party photos. Every thumbnail comes straight from eporner's own
-// `default_thumb.src` field, the same licensed source already used
-// site-wide. This exists purely to give the page a visual "here's what
-// this channel/performer/category actually looks like" preview right up
-// top, before the description and full grid.
 function renderPreviewStrip(videos, count = 6) {
     const preview = videos.slice(0, count);
     if (preview.length === 0) return '';
@@ -1148,16 +1049,11 @@ function renderPreviewStrip(videos, count = 6) {
     `;
 }
 
-function renderVideoGrid(videos, adType = 'none') {
+function renderVideoGrid(videos, adType = 'bucket') {
     let html = '';
-    let nativeAdPlaced = false;
     videos.forEach((v, index) => {
         const href = `/video/${v.id}/${toSlug(v.title)}`;
         const safeTitle = v.title.replace(/'/g, "\\'");
-        // Hover-to-preview: only wired up when the API result actually
-        // includes an embed URL (some endpoints do, some don't) — if it's
-        // missing, the thumbnail just behaves as a normal static image,
-        // never a broken preview.
         const hoverAttrs = v.embed
             ? `onmouseenter="playHoverPreview(this, '${v.embed}')" onmouseleave="stopHoverPreview(this)"`
             : '';
@@ -1175,23 +1071,15 @@ function renderVideoGrid(videos, adType = 'none') {
                 </a>
             </div>
         `;
-        const atSlotPosition = (index + 1) % 5 === 0; // after every 5th video
-        if (adType === 'native' && !nativeAdPlaced && atSlotPosition) {
-            html += NATIVE_BANNER_HTML;
-            nativeAdPlaced = true;
-        } else if (adType === 'banner' && atSlotPosition) {
-            html += INLINE_BANNER_HTML;
+        
+        // Insert ad after every 5th video
+        if (adType !== 'none' && (index + 1) % 5 === 0) {
+            html += EVERY_5TH_VIDEO_AD;
         }
     });
     return html;
 }
 
-// Hover-preview script, injected once site-wide (see renderHTMLPage).
-// On mouseenter, swaps the static thumbnail for a muted, autoplaying
-// iframe using the video's own embed URL — same behavior as eporner's
-// own hover-to-preview. On mouseleave, removes the iframe and restores
-// the static thumbnail, so nothing keeps playing/loading in the
-// background once the visitor moves on.
 const HOVER_PREVIEW_SCRIPT = `
 <script>
 function playHoverPreview(card, embedUrl) {
@@ -1221,12 +1109,6 @@ function stopHoverPreview(card) {
 // 4. ROUTES
 // -------------------------------------------------------------
 
-// CHANGE: Homepage now pulls THREE feeds instead of one:
-//   1. Brazzers — pinned first, per your request to lead with that brand
-//   2. Trending — order=top-weekly (eporner's real "trending" sort)
-//   3. Latest — order=latest (eporner's real "newest" sort)
-// All three run in parallel via Promise.allSettled so one failing feed
-// doesn't take down the whole homepage.
 app.get('/', async (req, res) => {
     try {
         const [brazzersRes, trendingRes, latestRes] = await Promise.allSettled([
@@ -1239,11 +1121,8 @@ app.get('/', async (req, res) => {
         const trendingVideos = trendingRes.status === 'fulfilled' ? (trendingRes.value.videos || []) : [];
         const latestVideos = latestRes.status === 'fulfilled' ? (latestRes.value.videos || []) : [];
 
-        // CHANGE: Trending keyword cloud now pulls from all three real feeds
-        // above (Brazzers + Trending + Latest) instead of just one, giving a
-        // wider genuine pool before ranking by frequency.
         const topKeywords = extractTopKeywords([brazzersVideos, trendingVideos, latestVideos]);
-        cache.set('trending-keywords', { data: topKeywords, time: Date.now() }); // reused by sitemap-keywords.xml
+        cache.set('trending-keywords', { data: topKeywords, time: Date.now() });
 
         const content = `
             ${renderSlider('Trending Keywords', topKeywords.map(kw => ({ label: kw, slug: toSlug(kw) })), k => `/keyword/${k.slug}`)}
@@ -1260,17 +1139,17 @@ app.get('/', async (req, res) => {
                     <h1 class="text-2xl font-bold text-red-500">Brazzers</h1>
                     <a href="/channel/brazzers" class="text-xs text-slate-400 hover:text-red-400">View all →</a>
                 </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(brazzersVideos, 'native')}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(brazzersVideos, 'bucket')}</div>
             </div>
 
             <div class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-slate-200">Trending This Week</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(trendingVideos, 'banner')}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(trendingVideos, 'bucket')}</div>
             </div>
 
             <div class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-slate-200">Latest Uploads</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos, 'banner')}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(latestVideos, 'bucket')}</div>
             </div>
         `;
 
@@ -1313,7 +1192,7 @@ app.get('/tag/:slug', async (req, res) => {
             <p class="text-sm text-slate-400 mb-2">${getDescription('tag', category.slug, category.blurb)}</p>
             ${renderPreviewStrip(videos)}
             ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'bucket')}</div>
             ${renderPagination(`/tag/${category.slug}`, order, page, hasMore)}
         `;
 
@@ -1329,9 +1208,6 @@ app.get('/tag/:slug', async (req, res) => {
     }
 });
 
-// NEW: Channel/studio pages (Brazzers, Blacked, MYLF, etc). Same pattern
-// as /tag and /star — real search query, real pagination/sort, single
-// native-ad instance since each page load is standalone.
 app.get('/channel/:slug', async (req, res) => {
     const channel = findBySlug(CHANNELS, req.params.slug);
     if (!channel) return res.status(404).send('Channel not found');
@@ -1355,7 +1231,7 @@ app.get('/channel/:slug', async (req, res) => {
             <p class="text-sm text-slate-400 mb-2">${getDescription('channel', channel.slug, channel.blurb)}</p>
             ${renderPreviewStrip(videos)}
             ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'bucket')}</div>
             ${renderPagination(`/channel/${channel.slug}`, order, page, hasMore)}
         `;
 
@@ -1371,7 +1247,6 @@ app.get('/channel/:slug', async (req, res) => {
     }
 });
 
-// NEW: Performer pages, same pattern as /tag/:slug.
 app.get('/star/:slug', async (req, res) => {
     const performer = findBySlug(PERFORMERS, req.params.slug);
     if (!performer) return res.status(404).send('Performer not found');
@@ -1399,7 +1274,7 @@ app.get('/star/:slug', async (req, res) => {
             ${renderBioSection(performer.slug)}
             ${renderPreviewStrip(videos)}
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'bucket')}</div>
             ${renderPagination(`/star/${performer.slug}`, order, page, hasMore)}
         `;
 
@@ -1415,12 +1290,6 @@ app.get('/star/:slug', async (req, res) => {
     }
 });
 
-// NEW: Generic keyword page. Unlike the old modifier-matrix approach, this
-// does NOT pre-generate a fixed list of URLs — it queries the API live for
-// whatever real keyword slug is requested (normally reached via the
-// Trending Keywords cloud on the homepage, which is itself built from
-// real current data). If a keyword returns no videos, it 404s instead of
-// serving an empty shell page.
 app.get('/keyword/:slug', async (req, res) => {
     const slug = req.params.slug;
     const term = fromSlug(slug);
@@ -1442,7 +1311,7 @@ app.get('/keyword/:slug', async (req, res) => {
                 <div class="flex gap-2">${renderSortLinks(`/keyword/${slug}`, order)}</div>
             </div>
             <p class="text-sm text-slate-400 mb-6">Currently trending clips matching "${term}".</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'native')}</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">${renderVideoGrid(videos, 'bucket')}</div>
             ${renderPagination(`/keyword/${slug}`, order, page, hasMore)}
         `;
 
@@ -1458,12 +1327,6 @@ app.get('/keyword/:slug', async (req, res) => {
     }
 });
 
-// NEW: Favorites page. Content lives only in the visitor's own browser
-// (localStorage), so the server can't render it — this page ships an empty
-// shell plus a script that reads localStorage and builds the grid
-// client-side. Marked noindex/nofollow: there's no real shared content
-// here for search engines to index, and indexing an empty shell would be
-// exactly the kind of thin-page problem we've been avoiding elsewhere.
 app.get('/favorites', (req, res) => {
     const content = `
         <h1 class="text-2xl font-bold mb-6 text-red-500">My Saved Videos</h1>
@@ -1511,7 +1374,6 @@ app.get('/search', (req, res) => {
     if (starMatch) return res.redirect(`/star/${starMatch.slug}`);
     const channelMatch = CHANNELS.find(ch => ch.label.toLowerCase() === q.toLowerCase() || ch.slug === toSlug(q));
     if (channelMatch) return res.redirect(`/channel/${channelMatch.slug}`);
-    // Fall back to a live keyword search page for anything else typed in.
     if (q.trim()) return res.redirect(`/keyword/${toSlug(q)}`);
     res.redirect('/');
 });
@@ -1534,16 +1396,6 @@ app.get('/video/:id/:slug?', async (req, res) => {
             contentUrl: video.url || undefined
         };
 
-        // Fetch related videos, prioritized as requested:
-        //   1. Same performer (if the video's title/keywords match a known
-        //      performer), trending order
-        //   2. Same category (if matched against known categories), trending
-        //   3. Real keywords from the video itself
-        //   4. The video's own title
-        //   5. Generic 'trending' — last resort, never show an empty section
-        // Each candidate is tried until one returns enough results, exactly
-        // like before — this just changes WHICH queries get tried first,
-        // and switches to trending (order=top-weekly) per your request.
         const keywordList = (video.keywords || '')
             .split(',')
             .map(k => k.trim())
@@ -1571,14 +1423,12 @@ app.get('/video/:id/:slug?', async (req, res) => {
                 const filtered = (relatedData.videos || []).filter(v => String(v.id) !== String(id));
                 if (filtered.length >= 5) {
                     relatedVideos = filtered.slice(0, 5);
-                    break; // good enough — stop trying further candidates
+                    break;
                 }
                 if (filtered.length > relatedVideos.length) {
-                    relatedVideos = filtered.slice(0, 5); // keep the best partial result so far
+                    relatedVideos = filtered.slice(0, 5);
                 }
-            } catch (err) {
-                // this candidate failed — just move on to the next one
-            }
+            } catch (err) {}
         }
 
         const relatedHtml = relatedVideos.length > 0 ? `
@@ -1588,15 +1438,11 @@ app.get('/video/:id/:slug?', async (req, res) => {
                     ${renderVideoGrid(relatedVideos, 'none')}
                 </div>
             </div>
+            <div class="mt-6">
+                ${EVERY_5TH_VIDEO_AD}
+            </div>
         ` : '';
 
-        // NEW: visible, clickable keyword tags on the video page itself —
-        // this was requested alongside the related-videos section but
-        // previously only used internally for the search query above,
-        // never actually shown to visitors. Each tag links to /search,
-        // which already resolves to the matching /tag/, /star/, or
-        // /channel/ page when one exists, or a live /keyword/ page
-        // otherwise — so every tag is a real, working link either way.
         const keywordTagsHtml = keywordList.length > 0 ? `
             <div class="flex flex-wrap gap-2 mb-6">
                 ${keywordList.slice(0, 12).map(kw => `
@@ -1612,14 +1458,12 @@ app.get('/video/:id/:slug?', async (req, res) => {
                     <iframe src="${video.embed}" class="absolute top-0 left-0 w-full h-full border-0" allowfullscreen></iframe>
                 </div>
                 <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 mb-6">
-                    <p class="text-xs text-slate-400 font-mono">Duration: ${video.length_min} mins | Rating: ★ ${video.rate || '4.8'}</p>
+                    <p class="text-xs text-slate-400 font-mono">Duration: ${video.length_sec ? Math.round(video.length_sec/60) : video.length_min} mins | Rating: ★ ${video.rate || '4.8'}</p>
                 </div>
                 ${keywordTagsHtml}
-                ${NATIVE_BANNER_HTML}
+                ${FLOAT_AD_PLAYER_SCRIPT}
                 ${relatedHtml}
             </div>
-            <script type="text/javascript">juicy_adzone = '1122725';</script>
-            <script type="text/javascript" src="https://poweredby.jads.co/js/jfc.js" charset="utf-8"></script>
         `;
 
         res.send(renderHTMLPage({
@@ -1637,40 +1481,30 @@ app.get('/video/:id/:slug?', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 5. SITEMAPS — now split into: index -> categories, performers, videos
+// 5. CSS & SITEMAPS
 // -------------------------------------------------------------
-// -------------------------------------------------------------
-// Static CSS — replaces the Tailwind CDN script. Previously the site
-// loaded https://cdn.tailwindcss.com, a ~124 KiB JavaScript file that
-// has to download AND execute before the page can render (confirmed
-// as the #1 render-blocking resource in PageSpeed Insights). This route
-// instead serves a pre-compiled, purged CSS file (~11 KiB) containing
-// only the Tailwind classes actually used across the site — a static
-// stylesheet the browser can apply immediately, no JS execution needed.
-//
-// IMPORTANT: if you add NEW Tailwind classes to this file that aren't
-// already used elsewhere, they won't appear in styles.css until you
-// rebuild it. Run: node scripts/build-css.js
-// (See that script for full instructions.)
 let COMPILED_CSS = '';
 try {
     COMPILED_CSS = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
 } catch (err) {
-    COMPILED_CSS = ''; // fine if not built yet — page just renders unstyled until it is
+    COMPILED_CSS = '';
 }
 
 app.get('/styles.css', (req, res) => {
     res.header('Content-Type', 'text/css');
-    res.header('Cache-Control', 'public, max-age=86400'); // 1 day — rebuild + redeploy to bust this
+    res.header('Cache-Control', 'public, max-age=86400');
     res.send(COMPILED_CSS);
 });
+
+const VIDEO_API_PER_PAGE = 100;
+const URLS_PER_SITEMAP_FILE = 1000;
+const API_PAGES_PER_FILE = URLS_PER_SITEMAP_FILE / VIDEO_API_PER_PAGE;
+const VIDEO_SITEMAP_PAGES = 40;
 
 app.get('/sitemap.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
     const now = new Date().toISOString();
 
-    // Generates one <sitemap> entry per paginated video sitemap file
-    // (sitemap-videos-1.xml ... sitemap-videos-N.xml).
     const videoSitemapEntries = Array.from({ length: VIDEO_SITEMAP_PAGES }, (_, i) => `
     <sitemap>
         <loc>${DOMAIN}/sitemap-videos-${i + 1}.xml</loc>
@@ -1719,7 +1553,6 @@ app.get('/sitemap-categories.xml', (req, res) => {
 </urlset>`);
 });
 
-// NEW: Performer sitemap.
 app.get('/sitemap-performers.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
     const urls = PERFORMERS.map(p => `
@@ -1735,8 +1568,6 @@ app.get('/sitemap-performers.xml', (req, res) => {
 </urlset>`);
 });
 
-// NEW: Channel/studio sitemap. Brazzers gets priority 1.0 to match its
-// pinned placement everywhere else on the site.
 app.get('/sitemap-channels.xml', (req, res) => {
     res.header('Content-Type', 'application/xml');
     const urls = CHANNELS.map(ch => `
@@ -1752,10 +1583,6 @@ app.get('/sitemap-channels.xml', (req, res) => {
 </urlset>`);
 });
 
-// NEW: Keyword sitemap — pulls from the same real trending-keyword cache
-// populated by the homepage (extractTopKeywords). If the cache is empty
-// (e.g. cold start, no one has hit "/" yet), it fetches trending videos
-// itself first rather than serving a stale fixed list.
 app.get('/sitemap-keywords.xml', async (req, res) => {
     res.header('Content-Type', 'application/xml');
     try {
@@ -1783,23 +1610,6 @@ app.get('/sitemap-keywords.xml', async (req, res) => {
     }
 });
 
-// NEW: Video sitemaps are PAGINATED — /sitemap-videos-1.xml,
-// /sitemap-videos-2.xml, etc. Each file holds up to
-// URLS_PER_SITEMAP_FILE real videos, assembled from several underlying
-// eporner API pages (VIDEO_API_PER_PAGE each). Real, content-backed
-// scale, not manufactured pages.
-//
-// Performance note: each sitemap file needs API_PAGES_PER_FILE upstream
-// API calls. These are fired in PARALLEL (Promise.all) rather than
-// sequentially, and each individual API page is cached on its own via
-// cachedGet (10 min TTL) — so the first crawl of a given file pays the
-// full latency once, and any crawl within the next 10 minutes (retries,
-// re-fetches, or Google re-checking) is served instantly from cache.
-const VIDEO_API_PER_PAGE = 100;
-const URLS_PER_SITEMAP_FILE = 1000;
-const API_PAGES_PER_FILE = URLS_PER_SITEMAP_FILE / VIDEO_API_PER_PAGE; // 10
-const VIDEO_SITEMAP_PAGES = 40; // 40 x 1,000 = 40,000 real video URLs total
-
 app.get('/sitemap-videos-:page.xml', async (req, res) => {
     res.header('Content-Type', 'application/xml');
     const page = parseInt(req.params.page, 10);
@@ -1808,8 +1618,6 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
     }
 
     try {
-        // Map this sitemap file to its underlying eporner API page range.
-        // e.g. sitemap file 1 -> API pages 1-10, file 2 -> API pages 11-20.
         const firstApiPage = (page - 1) * API_PAGES_PER_FILE + 1;
         const apiPages = Array.from({ length: API_PAGES_PER_FILE }, (_, i) => firstApiPage + i);
 
@@ -1817,12 +1625,9 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
             cachedGet(
                 `sitemap:videos:${apiPage}`,
                 `https://www.eporner.com/api/v2/video/search/?order=latest&page=${apiPage}&per_page=${VIDEO_API_PER_PAGE}&thumbsize=big&hd=1`
-            ).catch(() => ({ videos: [] })) // one failed sub-page shouldn't break the whole file
+            ).catch(() => ({ videos: [] }))
         ));
 
-        // Flatten and de-dupe by video id (defensive — API pagination
-        // shouldn't overlap, but duplicate <loc> entries are their own
-        // Search Console warning, so guard against it anyway).
         const seen = new Set();
         const videos = [];
         for (const data of results) {
@@ -1835,9 +1640,6 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
         }
 
         const urls = videos.map(v => {
-            // video:duration is OPTIONAL in Google's video sitemap spec and
-            // must be a whole number of seconds between 1 and 28800 (8 hrs)
-            // if present at all. Validate first, omit the tag if invalid.
             const rawDuration = Math.round(Number(v.length_sec));
             const hasValidDuration = Number.isFinite(rawDuration) && rawDuration >= 1 && rawDuration <= 28800;
             const durationTag = hasValidDuration ? `<video:duration>${rawDuration}</video:duration>` : '';
@@ -1866,9 +1668,6 @@ app.get('/sitemap-videos-:page.xml', async (req, res) => {
 });
 
 module.exports = app;
-// Exposed so scripts/generate-descriptions.js can reuse the exact same
-// lists without duplicating them. Attaching properties to an Express app
-// (a function) doesn't change how Vercel invokes it as a request handler.
 module.exports.CHANNELS = CHANNELS;
 module.exports.CATEGORIES = CATEGORIES;
 module.exports.PERFORMERS = PERFORMERS;
